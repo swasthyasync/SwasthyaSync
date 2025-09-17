@@ -1,0 +1,22 @@
+{
+  "name": "swasthyasync",
+  "private": true,
+  "scripts": {
+    "dev:web": "npm --prefix apps/web start",
+    "dev:api": "npm --prefix packages/api start",
+    "dev:worker": "npm --prefix packages/worker start"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "dependencies": {
+    "@types/node-fetch": "^2.6.13",
+    "chart.js": "^4.5.0",
+    "node-fetch": "^3.3.2",
+    "react-chartjs-2": "^5.3.0"
+  },
+  "devDependencies": {
+    "@apideck/better-ajv-errors": "^0.3.6"
+  }
+}

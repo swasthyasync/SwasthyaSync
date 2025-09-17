@@ -1,0 +1,15 @@
+{
+  "features": [
+    "q_appetite",
+    "q_body_temp",
+    "q_hair",
+    "q_physique",
+    "q_skin",
+    "q_sleep",
+    "q_stress_response",
+    "q_temperament",
+    "q_thirst"
+  ],
+  "n_rows_before": 500,
+  "n_rows_after": 500
+}

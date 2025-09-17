@@ -1,0 +1,50 @@
+{
+  "features": [
+    "age",
+    "gender",
+    "q_physique",
+    "q_skin",
+    "q_hair",
+    "q_appetite",
+    "q_thirst",
+    "q_sleep",
+    "q_body_temp",
+    "q_temperament",
+    "q_stress_response"
+  ],
+  "categorical_features": [
+    "gender",
+    "q_physique",
+    "q_skin",
+    "q_hair",
+    "q_appetite",
+    "q_thirst",
+    "q_sleep",
+    "q_body_temp",
+    "q_temperament",
+    "q_stress_response"
+  ],
+  "question_mapping": {
+    "q1": "q_physique",
+    "q2": "q_skin",
+    "q3": "q_hair",
+    "q4": "q_appetite",
+    "q5": "q_appetite",
+    "q6": "q_appetite",
+    "q7": "q_sleep",
+    "q8": "q_sleep",
+    "q9": "q_body_temp",
+    "q10": "q_body_temp",
+    "q11": "q_temperament",
+    "q12": "q_stress_response",
+    "q13": "q_temperament",
+    "q14": "q_temperament",
+    "q15": "q_temperament",
+    "q16": "q_temperament",
+    "q17": "q_temperament",
+    "q18": "q_appetite",
+    "q19": "q_physique",
+    "q20": "q_skin"
+  },
+  "model_type": "prakriti_lgbm"
+}

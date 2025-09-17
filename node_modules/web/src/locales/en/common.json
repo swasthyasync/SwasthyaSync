@@ -1,0 +1,167 @@
+{
+  "common": {
+    "appName": "SwasthyaSync",
+    "loading": "Loading...",
+    "error": "An error occurred",
+    "success": "Success",
+    "cancel": "Cancel",
+    "save": "Save",
+    "next": "Next",
+    "back": "Back",
+    "submit": "Submit",
+    "continue": "Continue"
+  },
+  "hero": {
+    "title": "SwasthyaSync — The Operating System for Accessible Ayurveda",
+    "subtitle": "A Panchakarma patient-management platform that combines traditional Ayurvedic wisdom with modern digital workflows",
+    "description": "SwasthyaSync helps clinics run Panchakarma programs reliably and helps patients follow therapy safely."
+  },
+  "features": {
+    "scheduling": "Intelligent scheduling and reminders",
+    "prakriti": "Prakriti-aware personalization",
+    "voice": "Voice gateway for phone-first access"
+  },
+  "prakriti": {
+    "title": "What is Prakriti?",
+    "vata": {
+      "name": "Vata",
+      "description": "Movement & variability. People with Vata prakriti tend to be lean, energetic, and prone to dryness."
+    },
+    "pitta": {
+      "name": "Pitta",
+      "description": "Transformation & heat. Pitta types have strong digestion and metabolism."
+    },
+    "kapha": {
+      "name": "Kapha",
+      "description": "Structure & stability. Kapha types are robust with steady energy."
+    }
+  },
+  "cta": {
+    "register": "Quick Register",
+    "getOTP": "Get OTP",
+    "callUs": "Call us",
+    "learnMore": "Learn More"
+  },
+  "privacy": "We keep audio and clinical data local; consent recorded at registration.",
+  "phoneEntry": {
+    "title": "Enter Your Phone Number",
+    "subtitle": "We'll send you an OTP to verify your number",
+    "phonePlaceholder": "Enter 10-digit phone number",
+    "countryCode": "+91",
+    "sendOTP": "Send OTP",
+    "alternativeText": "Or call us directly at",
+    "validationError": "Please enter a valid 10-digit phone number",
+    "sendingOTP": "Sending OTP...",
+    "otpSent": "OTP sent successfully!"
+  },
+  "otpVerify": {
+    "title": "Verify OTP",
+    "subtitle": "Enter the 6-digit code sent to",
+    "resendOTP": "Resend OTP",
+    "resendIn": "Resend in",
+    "seconds": "seconds",
+    "verifying": "Verifying...",
+    "invalidOTP": "Invalid OTP. Please try again.",
+    "changeNumber": "Change phone number"
+  },
+  "registration": {
+    "title": "Complete Your Registration",
+    "subtitle": "Tell us about yourself",
+    "firstName": "First Name",
+    "lastName": "Last Name",
+    "email": "Email Address (Optional)",
+    "dateOfBirth": "Date of Birth",
+    "gender": "Gender",
+    "male": "Male",
+    "female": "Female",
+    "other": "Other",
+    "address": "Address",
+    "city": "City",
+    "state": "State",
+    "pincode": "Pincode",
+    "emergencyContact": "Emergency Contact",
+    "emergencyPhone": "Emergency Contact Phone",
+    "medicalHistory": "Medical History (Optional)",
+    "currentMedications": "Current Medications (Optional)",
+    "allergies": "Allergies (Optional)",
+    "termsAgree": "I agree to the terms and conditions",
+    "privacyAgree": "I consent to the privacy policy",
+    "register": "Complete Registration"
+  },
+  "questionnaire": {
+    "title": "Prakriti Assessment",
+    "subtitle": "Answer these questions to determine your Ayurvedic constitution",
+    "progress": "Question {{current}} of {{total}}",
+    "skipQuestion": "Skip",
+    "selectAnswer": "Select an answer",
+    "bodyType": {
+      "question": "How would you describe your body build?",
+      "thin": "Thin, light frame",
+      "medium": "Medium, athletic build",
+      "large": "Large, sturdy frame"
+    },
+    "skinType": {
+      "question": "How would you describe your skin?",
+      "dry": "Dry, rough, cool",
+      "warm": "Warm, soft, prone to redness",
+      "oily": "Thick, oily, smooth"
+    },
+    "digestion": {
+      "question": "How is your digestion?",
+      "irregular": "Irregular, prone to gas",
+      "strong": "Strong, prone to acidity",
+      "slow": "Slow but steady"
+    },
+    "complete": "Complete Assessment",
+    "result": "Your Prakriti Result"
+  },
+  "dashboard": {
+    "welcome": "Welcome back",
+    "appointments": "Appointments",
+    "upcomingAppointments": "Upcoming Appointments",
+    "pastAppointments": "Past Appointments",
+    "bookAppointment": "Book New Appointment",
+    "myProfile": "My Profile",
+    "therapyPlan": "Therapy Plan",
+    "reports": "Reports",
+    "notifications": "Notifications",
+    "logout": "Logout",
+    "noAppointments": "No appointments scheduled",
+    "viewDetails": "View Details",
+    "reschedule": "Reschedule",
+    "cancel": "Cancel Appointment"
+  },
+  "practitioner": {
+    "title": "Practitioner Dashboard",
+    "todaySchedule": "Today's Schedule",
+    "patients": "Patients",
+    "viewPatient": "View Patient",
+    "addNotes": "Add Notes",
+    "prescriptions": "Prescriptions",
+    "therapyChecklists": "Therapy Checklists"
+  },
+  "admin": {
+    "title": "Admin Dashboard",
+    "overview": "Overview",
+    "clinicManagement": "Clinic Management",
+    "staffManagement": "Staff Management",
+    "reports": "Reports",
+    "settings": "Settings",
+    "analytics": "Analytics"
+  },
+  "appointment": {
+    "selectDate": "Select Date",
+    "selectTime": "Select Time",
+    "selectTherapy": "Select Therapy Type",
+    "selectPractitioner": "Select Practitioner",
+    "confirmBooking": "Confirm Booking",
+    "bookingConfirmed": "Appointment Confirmed!",
+    "bookingFailed": "Booking failed. Please try again."
+  },
+  "errors": {
+    "networkError": "Network error. Please check your connection.",
+    "serverError": "Server error. Please try again later.",
+    "validationError": "Please check your input and try again.",
+    "unauthorized": "Please login to continue."
+  }
+}
