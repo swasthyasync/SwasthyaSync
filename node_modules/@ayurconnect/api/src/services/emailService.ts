@@ -11,33 +11,57 @@ const EMAIL_PORT = process.env.EMAIL_PORT ? Number(process.env.EMAIL_PORT) : und
 const EMAIL_SECURE = process.env.EMAIL_SECURE === 'true'; // optional
 
 if (!EMAIL_USER || !EMAIL_PASS) {
-  log('Warning: EMAIL_USER or EMAIL_PASS not set - email sending disabled');
+  log('Warning: EMAIL_USER or EMAIL_PASS not set - email sending disabled or will use test account in dev');
 }
 
-const transporter = (EMAIL_USER && EMAIL_PASS) ? nodemailer.createTransport({
-  host: EMAIL_HOST || 'smtp.gmail.com',
-  port: EMAIL_PORT ?? 465,
-  secure: typeof EMAIL_SECURE === 'boolean' ? EMAIL_SECURE : true,
-  auth: {
-    user: EMAIL_USER,
-    pass: EMAIL_PASS
-  },
-  tls: {
-    rejectUnauthorized: false
-  }
-}) : null;
+let transporter: nodemailer.Transporter | null = null;
 
-/**
- * Verify transporter in dev when transporter exists
- */
-if (transporter && process.env.NODE_ENV !== 'production') {
-  transporter.verify((err, success) => {
-    if (err) {
-      console.error('Email transporter verify failed:', err);
-    } else {
-      console.log('✅ Email transporter verified');
+async function initTransporter() {
+  if (transporter) return transporter;
+
+  if (EMAIL_USER && EMAIL_PASS) {
+    transporter = nodemailer.createTransport({
+      host: EMAIL_HOST || 'smtp.gmail.com',
+      port: EMAIL_PORT ?? 465,
+      secure: typeof EMAIL_SECURE === 'boolean' ? EMAIL_SECURE : true,
+      auth: {
+        user: EMAIL_USER,
+        pass: EMAIL_PASS
+      },
+      tls: {
+        rejectUnauthorized: false
+      }
+    });
+  } else if (process.env.NODE_ENV !== 'production') {
+    // Try ethereal for dev if no creds are provided
+    try {
+      const testAccount = await nodemailer.createTestAccount();
+      transporter = nodemailer.createTransport({
+        host: 'smtp.ethereal.email',
+        port: 587,
+        secure: false,
+        auth: { user: testAccount.user, pass: testAccount.pass }
+      });
+      console.log('[emailService] Using Ethereal test SMTP account for dev', testAccount.user);
+    } catch (err) {
+      console.warn('[emailService] Failed to create ethereal test account:', (err as any)?.message ?? err);
+      transporter = null;
     }
-  });
+  } else {
+    transporter = null;
+  }
+
+  if (transporter && process.env.NODE_ENV !== 'production') {
+    transporter.verify((err, success) => {
+      if (err) {
+        console.error('Email transporter verify failed:', err);
+      } else {
+        console.log('✅ Email transporter verified');
+      }
+    });
+  }
+
+  return transporter;
 }
 
 /** Simple wrapper to send mail */
@@ -48,30 +72,41 @@ export async function sendMail(opts: {
   html?: string;
   text?: string;
 }) {
-  if (!transporter) {
-    const message = 'Email transporter not configured';
-    console.warn(message);
-    throw new Error(message);
+  const t = await initTransporter();
+  if (!t) {
+    const message = 'Email transporter not configured; skipping send';
+    console.warn('[emailService] ' + message);
+    // don't throw; return an object so caller may check if needed
+    return { ok: false, message };
   }
 
   const mailOptions = {
-    from: opts.from || `"AyurConnect" <${EMAIL_USER}>`,
+    from: opts.from || `"AyurConnect" <${EMAIL_USER || 'no-reply@ayurconnect.com'}>`,
     to: opts.to,
     subject: opts.subject,
     html: opts.html,
     text: opts.text
   };
 
-  const result = await transporter.sendMail(mailOptions);
-  log('Mail sent result:', result);
-  return result;
+  try {
+    const result = await t.sendMail(mailOptions);
+    log('Mail sent result:', result);
+
+    if (process.env.NODE_ENV !== 'production') {
+      const preview = (nodemailer as any).getTestMessageUrl ? (nodemailer as any).getTestMessageUrl(result) : undefined;
+      if (preview) console.log('[emailService] Preview URL:', preview);
+    }
+
+    return { ok: true, result };
+  } catch (err: any) {
+    console.warn('[emailService] sendMail failed:', err?.message ?? err);
+    return { ok: false, error: err?.message ?? err };
+  }
 }
 
 /** OTP email template (ported from your old project) */
 export function getOtpEmailTemplate(otp: string, userName = 'User', expiryMinutes = 5) {
-  const html = `<!doctype html> ...` // truncated for brevity below
-  // Use the full HTML from your old project. (See note)
-  // For brevity include a short HTML version here:
+  // You said you have full HTML elsewhere — keep short variant here
   const shortHtml = `
     <div style="font-family: Arial, sans-serif; line-height:1.4; color:#333">
       <h2>Hello ${userName}</h2>

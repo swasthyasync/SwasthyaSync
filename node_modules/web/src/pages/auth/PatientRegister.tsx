@@ -3,6 +3,8 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import api from '../../utils/api';
+import { useEffect } from 'react';
+import { supabase } from '../../utils/supabase'; // Make sure you have this import
 
 interface RegistrationData {
   firstName: string;
@@ -49,6 +51,7 @@ const PatientRegister: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [checkingAuth, setCheckingAuth] = useState(true);
   const [formData, setFormData] = useState<RegistrationData>({
     firstName: '',
     lastName: '',
@@ -81,7 +84,73 @@ const PatientRegister: React.FC = () => {
     termsAccepted: false
   });
 
+  // Read pending identifier set by OTP flow (if any)
+  const pendingIdentifierType =
+    (sessionStorage.getItem('pendingIdentifierType') as 'phone' | 'email' | null) ?? null;
+  const pendingIdentifierValue = sessionStorage.getItem('pendingIdentifierValue') ?? '';
+
   const totalPages = 2;
+
+// On mount, check if user is already authenticated and their onboarding status
+useEffect(() => {
+  const checkAuthAndData = async () => {
+    try {
+      console.log('Checking authentication...');
+
+      // Check for stored JWT token instead of Supabase session
+      const token = localStorage.getItem('token');
+      const userData = localStorage.getItem('user');
+
+      if (token && userData) {
+        try {
+          const parsedUser = JSON.parse(userData);
+          console.log('Found stored auth:', parsedUser.id);
+
+          // Verify token is still valid by making an API call
+          const response = await api.get('/auth/profile', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          if (response.success && response.user) {
+            const user = response.user;
+
+            // Ensure phone & userId are available
+            if (!user.phone || !user.id) {
+              console.error('[PatientRegister] Missing phone or userId');
+              navigate('/auth/phone');
+              return;
+            }
+
+            // Check onboarding status
+            if (user.onboarding?.questionnaire_completed) {
+              navigate('/patient/dashboard');
+              return;
+            }
+
+            if (user.onboarding?.personal_details_completed) {
+              navigate('/auth/prakriti-questionnaire');
+              return;
+            }
+          }
+        } catch (tokenError) {
+          console.log('Token validation failed, clearing stored auth');
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+        }
+      } else {
+        console.log('No stored authentication found');
+      }
+
+      setCheckingAuth(false);
+    } catch (error) {
+      console.error('Auth check error:', error);
+      setCheckingAuth(false);
+    }
+  };
+
+  checkAuthAndData();
+}, [navigate]);
+
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
@@ -142,13 +211,13 @@ const PatientRegister: React.FC = () => {
   const handleNext = () => {
     if (validateCurrentPage()) {
       setCurrentPage(prev => Math.min(prev + 1, totalPages));
-      window.scrollTo(0, 0);
+      window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
     }
   };
 
   const handlePrevious = () => {
     setCurrentPage(prev => Math.max(prev - 1, 1));
-    window.scrollTo(0, 0);
+    window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -162,22 +231,116 @@ const PatientRegister: React.FC = () => {
     setError('');
 
     try {
-      const phone = sessionStorage.getItem('pendingPhone');
-      const response = await api.register({
-        ...formData,
-        phone
-      });
+      // Get pending identifier from sessionStorage (set during OTP flow)
+      const pendingIdentifierType = sessionStorage.getItem('pendingIdentifierType') as 'phone' | 'email' | null;
+      const pendingIdentifierValue = sessionStorage.getItem('pendingIdentifierValue') || '';
 
-      localStorage.setItem('registrationData', JSON.stringify(formData));
-      localStorage.setItem('user', JSON.stringify(response.user));
-      api.setToken(response.token);
-      navigate('/auth/prakriti-questionnaire');
+      // Prepare complete payload for backend
+      const registrationPayload: any = {
+        // Personal details
+        firstName: formData.firstName.trim(),
+        lastName: formData.lastName.trim(),
+        dateOfBirth: formData.dateOfBirth,
+        gender: formData.gender,
+        address: formData.address.trim(),
+        
+        // Emergency contact
+        emergencyContact: formData.emergencyContact.trim(),
+        emergencyName: formData.emergencyName.trim(),
+        emergencyRelation: formData.emergencyRelation,
+        
+        // Enhanced health data
+        occupation: formData.occupation,
+        chronicConditions: formData.chronicConditions,
+        currentMedications: formData.currentMedications,
+        allergies: formData.allergies,
+        previousSurgeries: formData.previousSurgeries,
+        familyHistory: formData.familyHistory,
+        exerciseFrequency: formData.exerciseFrequency,
+        sleepPattern: formData.sleepPattern,
+        smokingStatus: formData.smokingStatus,
+        alcoholConsumption: formData.alcoholConsumption,
+        stressLevel: formData.stressLevel,
+        previousAyurvedicTreatment: formData.previousAyurvedicTreatment,
+        specificConcerns: formData.specificConcerns,
+        treatmentGoals: formData.treatmentGoals,
+        dietaryPreferences: formData.dietaryPreferences,
+        
+        // Consent - REQUIRED
+        consent: formData.healthDataConsent || formData.consent,
+      };
+
+      // Add identifier from OTP flow
+      if (pendingIdentifierType === 'phone' && pendingIdentifierValue) {
+        registrationPayload.phone = pendingIdentifierValue;
+      } else if (pendingIdentifierType === 'email' && pendingIdentifierValue) {
+        registrationPayload.email = pendingIdentifierValue;
+      } else if (formData.email.trim()) {
+        // Fallback to form email if no pending identifier
+        registrationPayload.email = formData.email.trim();
+      }
+
+      console.log('Submitting registration with payload:', registrationPayload);
+
+      // Call your API to register user
+      const response = await api.register(registrationPayload);
+      console.log('Registration response:', response);
+
+    if (response.success && response.token && response.user) {
+  const token = response.token;
+  const user = response.user;
+
+  // Store authentication token only
+  localStorage.setItem('token', token);
+  
+  // Clear any old localStorage data
+  localStorage.removeItem('registrationData');
+  localStorage.removeItem('prakritiResults');
+  localStorage.removeItem('user'); // Remove this completely
+
+  console.log('Registration successful, user data saved to database');
+  navigate('/auth/prakriti-questionnaire', { state: { userId: user.id } });
+} else {
+  throw new Error('Registration response missing required fields');
+}
+
     } catch (err: any) {
-      setError(err.message || 'Registration failed. Please try again.');
+      console.error('Registration error:', err);
+      const errorMessage = err?.message || 'Registration failed. Please try again.';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
   };
+
+  // Show loading while checking authentication
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" 
+        style={{
+          background: `
+            radial-gradient(ellipse at top left, rgba(255, 183, 77, 0.15), transparent 40%),
+            radial-gradient(ellipse at bottom right, rgba(139, 69, 19, 0.2), transparent 40%),
+            linear-gradient(135deg, #2c1810 0%, #3d2817 25%, #4a3420 50%, #3d2817 75%, #2c1810 100%)
+          `
+        }}
+      >
+        <div className="text-center">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center text-4xl animate-pulse"
+            style={{
+              background: 'linear-gradient(135deg, #b8860b, #daa520, #ffd700)',
+              boxShadow: '0 0 30px rgba(255, 215, 0, 0.5)'
+            }}
+          >
+            🌿
+          </div>
+          <p className="text-lg" style={{ color: '#ffd700' }}>
+            Checking your account...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const CustomCheckbox = ({ checked, onChange, children }: { checked: boolean; onChange: () => void; children: React.ReactNode }) => (
     <label className="flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all hover:bg-opacity-10 hover:bg-yellow-400">
@@ -309,7 +472,6 @@ const PatientRegister: React.FC = () => {
             `
           }}
         />
-
         {/* Floating herbs */}
         <div className="fixed w-10 h-10 top-[10%] left-[10%] rounded-full herb-float-1 opacity-15"
           style={{ background: 'radial-gradient(circle, #8b6914 0%, transparent 70%)' }} />
@@ -334,7 +496,7 @@ const PatientRegister: React.FC = () => {
         <div className="fixed w-[800px] h-[800px] top-1/2 left-1/2 border border-yellow-400/20 rounded-full pulse-ring-3" />
 
         <div className="max-w-6xl mx-auto relative z-10">
-          {/* Progress Bar */}
+         {/* Progress Bar */}
           <motion.div 
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -400,6 +562,13 @@ const PatientRegister: React.FC = () => {
                       Welcome to SwastyaSync
                     </h2>
                     <p style={{ color: '#6b4423' }}>Let's set up your profile efficiently</p>
+
+                    {/* Show pending identifier for clarity */}
+                    {pendingIdentifierValue && (
+                      <p className="text-sm mt-2" style={{ color: '#8b6914' }}>
+                        Registering with <strong>{pendingIdentifierType === 'phone' ? pendingIdentifierValue : pendingIdentifierValue}</strong>
+                      </p>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">

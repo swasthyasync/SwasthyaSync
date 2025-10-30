@@ -1,9 +1,6 @@
-// apps/web/src/components/PrakritiSummaryCard.tsx
-import React, { useState, useEffect, useRef } from 'react';
-import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement } from 'chart.js';
-import { Pie, Bar } from 'react-chartjs-2';
-
-ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement);
+// apps/web/src/components/PrakritiSummaryCard.tsx - COMPLETE UPDATED VERSION
+import React, { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 
 export interface PrakritiScores {
   vata: number;
@@ -29,58 +26,6 @@ export interface Props {
 
 const PrakritiSummaryCard: React.FC<Props> = ({ scores, therapyRecommendations }) => {
   const [activeTab, setActiveTab] = useState('analysis');
-  const [chartData, setChartData] = useState<any>(null);
-  const [barData, setBarData] = useState<any>(null);
-
-  useEffect(() => {
-    // Prepare pie chart data
-    const pieData = {
-      labels: ['Vata', 'Pitta', 'Kapha'],
-      datasets: [
-        {
-          label: 'Prakriti Distribution',
-          data: [scores.percent.vata, scores.percent.pitta, scores.percent.kapha],
-          backgroundColor: [
-            'rgba(59, 130, 246, 0.8)', // Blue for Vata
-            'rgba(239, 68, 68, 0.8)',  // Red for Pitta
-            'rgba(34, 197, 94, 0.8)',  // Green for Kapha
-          ],
-          borderColor: [
-            'rgba(59, 130, 246, 1)',
-            'rgba(239, 68, 68, 1)',
-            'rgba(34, 197, 94, 1)',
-          ],
-          borderWidth: 2,
-        },
-      ],
-    };
-
-    // Prepare bar chart data
-    const barChartData = {
-      labels: ['Vata', 'Pitta', 'Kapha'],
-      datasets: [
-        {
-          label: 'Prakriti Percentage',
-          data: [scores.percent.vata, scores.percent.pitta, scores.percent.kapha],
-          backgroundColor: [
-            'rgba(59, 130, 246, 0.8)',
-            'rgba(239, 68, 68, 0.8)',
-            'rgba(34, 197, 94, 0.8)',
-          ],
-          borderColor: [
-            'rgba(59, 130, 246, 1)',
-            'rgba(239, 68, 68, 1)',
-            'rgba(34, 197, 94, 1)',
-          ],
-          borderWidth: 2,
-          borderRadius: 8,
-        },
-      ],
-    };
-
-    setChartData(pieData);
-    setBarData(barChartData);
-  }, [scores]);
 
   const getColorClass = (type: string) => {
     switch (type) {
@@ -114,56 +59,194 @@ const PrakritiSummaryCard: React.FC<Props> = ({ scores, therapyRecommendations }
     return 'text-red-600';
   };
 
-  const chartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'bottom' as const,
-        labels: {
-          padding: 20,
-          usePointStyle: true,
-          font: {
-            size: 14,
-          },
-        },
-      },
-      tooltip: {
-        callbacks: {
-          label: function(context: any) {
-            return `${context.label}: ${context.parsed}%`;
-          }
-        }
-      }
-    },
+  // Custom SVG Pie Chart Component
+  const CustomPieChart: React.FC<{ scores: PrakritiScores }> = ({ scores }) => {
+    const radius = 90;
+    const circumference = 2 * Math.PI * radius;
+    
+    // Calculate stroke lengths
+    const vataLength = (scores.percent.vata / 100) * circumference;
+    const pittaLength = (scores.percent.pitta / 100) * circumference;
+    const kaphaLength = (scores.percent.kapha / 100) * circumference;
+    
+    // Calculate offsets for stacking
+    const vataOffset = 0;
+    const pittaOffset = -vataLength;
+    const kaphaOffset = -(vataLength + pittaLength);
+
+    return (
+      <div className="flex items-center justify-center">
+        <div className="relative w-64 h-64">
+          <svg viewBox="0 0 200 200" className="w-full h-full transform -rotate-90">
+            {/* Background circle */}
+            <circle
+              cx="100"
+              cy="100"
+              r={radius}
+              fill="none"
+              stroke="#f3f4f6"
+              strokeWidth="20"
+            />
+            
+            {/* Vata arc */}
+            <motion.circle
+              cx="100"
+              cy="100"
+              r={radius}
+              fill="none"
+              stroke="#3b82f6"
+              strokeWidth="18"
+              strokeLinecap="round"
+              initial={{ strokeDasharray: `0 ${circumference}`, strokeDashoffset: 0 }}
+              animate={{ 
+                strokeDasharray: `${vataLength} ${circumference}`,
+                strokeDashoffset: vataOffset
+              }}
+              transition={{ duration: 1, ease: 'easeOut' }}
+            />
+            
+            {/* Pitta arc */}
+            <motion.circle
+              cx="100"
+              cy="100"
+              r={radius}
+              fill="none"
+              stroke="#ef4444"
+              strokeWidth="18"
+              strokeLinecap="round"
+              initial={{ strokeDasharray: `0 ${circumference}`, strokeDashoffset: 0 }}
+              animate={{ 
+                strokeDasharray: `${pittaLength} ${circumference}`,
+                strokeDashoffset: pittaOffset
+              }}
+              transition={{ duration: 1, ease: 'easeOut', delay: 0.2 }}
+            />
+            
+            {/* Kapha arc */}
+            <motion.circle
+              cx="100"
+              cy="100"
+              r={radius}
+              fill="none"
+              stroke="#22c55e"
+              strokeWidth="18"
+              strokeLinecap="round"
+              initial={{ strokeDasharray: `0 ${circumference}`, strokeDashoffset: 0 }}
+              animate={{ 
+                strokeDasharray: `${kaphaLength} ${circumference}`,
+                strokeDashoffset: kaphaOffset
+              }}
+              transition={{ duration: 1, ease: 'easeOut', delay: 0.4 }}
+            />
+
+            {/* Rotating shimmer effect */}
+            <defs>
+              <linearGradient id="shimmer" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="rgba(255,255,255,0)" />
+                <stop offset="50%" stopColor="rgba(255,255,255,0.3)" />
+                <stop offset="100%" stopColor="rgba(255,255,255,0)" />
+              </linearGradient>
+            </defs>
+            <motion.circle
+              cx="100"
+              cy="100"
+              r={radius + 5}
+              fill="none"
+              stroke="url(#shimmer)"
+              strokeWidth="2"
+              strokeDasharray="8 4"
+              initial={{ rotate: 0 }}
+              animate={{ rotate: 360 }}
+              transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
+              style={{ transformOrigin: '50% 50%' }}
+            />
+          </svg>
+          
+          {/* Center text */}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <motion.div 
+              className="text-center bg-white rounded-full w-20 h-20 flex flex-col items-center justify-center shadow-lg border-2 border-gray-100"
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.8, duration: 0.5 }}
+            >
+              <div className="text-xl font-bold text-gray-800 capitalize">
+                {scores.ml_prediction ? scores.ml_prediction.predicted : scores.dominant}
+              </div>
+              <div className="text-xs text-gray-600">
+                {scores.ml_prediction ? 'AI Prediction' : 'Traditional'}
+              </div>
+            </motion.div>
+          </div>
+        </div>
+      </div>
+    );
   };
 
-  const barOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        display: false,
-      },
-      tooltip: {
-        callbacks: {
-          label: function(context: any) {
-            return `${context.label}: ${context.parsed.y}%`;
-          }
-        }
-      }
-    },
-    scales: {
-      y: {
-        beginAtZero: true,
-        max: 100,
-        ticks: {
-          callback: function(value: any) {
-            return value + '%';
-          }
-        }
-      },
-    },
+  // Custom 3D Bar Chart Component
+  const Custom3DBarChart: React.FC<{ scores: PrakritiScores }> = ({ scores }) => {
+    const maxHeight = 200;
+    const bars = [
+      { key: 'vata', label: 'Vata', percent: scores.percent.vata, color: '#3b82f6' },
+      { key: 'pitta', label: 'Pitta', percent: scores.percent.pitta, color: '#ef4444' },
+      { key: 'kapha', label: 'Kapha', percent: scores.percent.kapha, color: '#22c55e' },
+    ];
+
+    return (
+      <div className="flex items-end justify-center space-x-8 h-64">
+        {bars.map((bar, index) => (
+          <div key={bar.key} className="flex flex-col items-center">
+            <div className="relative">
+              {/* 3D Bar */}
+              <motion.div
+                className="relative"
+                style={{ 
+                  width: 60,
+                  background: `linear-gradient(135deg, ${bar.color}, ${bar.color}dd)`
+                }}
+                initial={{ height: 0 }}
+                animate={{ height: (bar.percent / 100) * maxHeight }}
+                transition={{ duration: 1.2, delay: index * 0.2, ease: 'easeOut' }}
+              >
+                {/* 3D effect - top */}
+                <div 
+                  className="absolute -top-2 left-0 w-full h-4"
+                  style={{
+                    background: `linear-gradient(45deg, ${bar.color}ee, ${bar.color}bb)`,
+                    transform: 'skewX(-45deg) scaleY(0.5)'
+                  }}
+                />
+                
+                {/* 3D effect - right side */}
+                <div 
+                  className="absolute top-0 -right-2 w-4 h-full"
+                  style={{
+                    background: `linear-gradient(135deg, ${bar.color}cc, ${bar.color}99)`,
+                    transform: 'skewY(-45deg) scaleX(0.5)'
+                  }}
+                />
+
+                {/* Percentage label */}
+                <motion.div 
+                  className="absolute inset-0 flex items-center justify-center text-white font-bold text-sm"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: index * 0.2 + 0.8 }}
+                >
+                  {bar.percent}%
+                </motion.div>
+              </motion.div>
+            </div>
+
+            {/* Label */}
+            <div className="mt-4 text-center">
+              <div className="font-semibold text-gray-800">{bar.label}</div>
+              <div className="text-xs text-gray-600 mt-1">{getDescription(bar.key)}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
   };
 
   return (
@@ -214,7 +297,11 @@ const PrakritiSummaryCard: React.FC<Props> = ({ scores, therapyRecommendations }
               <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center">
-                    <div className="w-3 h-3 bg-blue-500 rounded-full mr-2"></div>
+                    <motion.div 
+                      className="w-3 h-3 bg-blue-500 rounded-full mr-2"
+                      animate={{ scale: [1, 1.2, 1] }}
+                      transition={{ duration: 2, repeat: Infinity }}
+                    />
                     <span className="text-sm font-medium text-gray-700">
                       AI Prediction Confidence
                     </span>
@@ -224,139 +311,220 @@ const PrakritiSummaryCard: React.FC<Props> = ({ scores, therapyRecommendations }
                   </span>
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className="bg-blue-500 h-2 rounded-full transition-all duration-500"
-                    style={{ width: `${scores.ml_prediction.confidence * 100}%` }}
+                  <motion.div
+                    className="bg-blue-500 h-2 rounded-full"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${scores.ml_prediction.confidence * 100}%` }}
+                    transition={{ duration: 1, ease: 'easeOut' }}
                   />
                 </div>
               </div>
             )}
 
-            {/* Progress Bars */}
+            {/* Enhanced Progress Bars */}
             <div className="space-y-6 mb-6">
-              {/* Vata */}
-              <div>
-                <div className="flex justify-between items-center mb-3">
-                  <div>
-                    <span className="font-semibold text-gray-800 text-lg">Vata</span>
-                    <span className="text-sm text-gray-500 ml-2 block">{getDescription('vata')}</span>
+              {['vata', 'pitta', 'kapha'].map((dosha, index) => (
+                <div key={dosha}>
+                  <div className="flex justify-between items-center mb-3">
+                    <div>
+                      <span className="font-semibold text-gray-800 text-lg capitalize">{dosha}</span>
+                      <span className="text-sm text-gray-500 ml-2 block">{getDescription(dosha)}</span>
+                    </div>
+                    <motion.span 
+                      className={`text-2xl font-bold ${
+                        dosha === 'vata' ? 'text-blue-600' :
+                        dosha === 'pitta' ? 'text-red-600' : 'text-green-600'
+                      }`}
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      transition={{ delay: index * 0.2, duration: 0.5, type: 'spring' }}
+                    >
+                      {scores.percent[dosha as keyof typeof scores.percent]}%
+                    </motion.span>
                   </div>
-                  <span className="text-2xl font-bold text-blue-600">{scores.percent.vata}%</span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-4 shadow-inner">
-                  <div
-                    className="bg-gradient-to-r from-blue-400 to-blue-600 h-4 rounded-full transition-all duration-1000 shadow-sm"
-                    style={{ width: `${scores.percent.vata}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* Pitta */}
-              <div>
-                <div className="flex justify-between items-center mb-3">
-                  <div>
-                    <span className="font-semibold text-gray-800 text-lg">Pitta</span>
-                    <span className="text-sm text-gray-500 ml-2 block">{getDescription('pitta')}</span>
+                  <div className="w-full bg-gray-200 rounded-full h-4 shadow-inner overflow-hidden">
+                    <motion.div
+                      className={`h-4 rounded-full shadow-sm relative overflow-hidden ${
+                        dosha === 'vata' ? 'bg-gradient-to-r from-blue-400 to-blue-600' :
+                        dosha === 'pitta' ? 'bg-gradient-to-r from-red-400 to-red-600' :
+                        'bg-gradient-to-r from-green-400 to-green-600'
+                      }`}
+                      initial={{ width: 0 }}
+                      animate={{ width: `${scores.percent[dosha as keyof typeof scores.percent]}%` }}
+                      transition={{ duration: 1.5, delay: index * 0.3 }}
+                    >
+                      {/* Shimmer effect */}
+                      <motion.div
+                        className="absolute inset-0 bg-gradient-to-r from-transparent via-white to-transparent opacity-30"
+                        initial={{ x: '-100%' }}
+                        animate={{ x: '100%' }}
+                        transition={{ 
+                          duration: 2, 
+                          delay: index * 0.3 + 1, 
+                          ease: 'easeInOut' 
+                        }}
+                      />
+                    </motion.div>
                   </div>
-                  <span className="text-2xl font-bold text-red-600">{scores.percent.pitta}%</span>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-4 shadow-inner">
-                  <div
-                    className="bg-gradient-to-r from-red-400 to-red-600 h-4 rounded-full transition-all duration-1000 shadow-sm"
-                    style={{ width: `${scores.percent.pitta}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* Kapha */}
-              <div>
-                <div className="flex justify-between items-center mb-3">
-                  <div>
-                    <span className="font-semibold text-gray-800 text-lg">Kapha</span>
-                    <span className="text-sm text-gray-500 ml-2 block">{getDescription('kapha')}</span>
-                  </div>
-                  <span className="text-2xl font-bold text-green-600">{scores.percent.kapha}%</span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-4 shadow-inner">
-                  <div
-                    className="bg-gradient-to-r from-green-400 to-green-600 h-4 rounded-full transition-all duration-1000 shadow-sm"
-                    style={{ width: `${scores.percent.kapha}%` }}
-                  />
-                </div>
-              </div>
+              ))}
             </div>
 
-            {/* Dominant Type */}
-            <div className="p-6 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl border border-purple-200">
+            {/* Enhanced Dominant Type Card */}
+            <motion.div 
+              className="p-6 bg-gradient-to-br from-purple-50 via-indigo-50 to-blue-50 rounded-xl border border-purple-200 shadow-lg"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 1, duration: 0.8 }}
+            >
               <div className="text-center">
                 <h4 className="text-sm font-medium text-gray-600 mb-2">Your Dominant Constitution</h4>
-                <p className="text-3xl font-bold text-gray-800 capitalize mb-2">{scores.dominant} Prakriti</p>
-                <p className="text-sm text-gray-600">{getDescription(scores.dominant)}</p>
-                <div className="mt-4 flex justify-center">
-                  <div className={`w-16 h-16 ${getColorClass(scores.dominant)} rounded-full flex items-center justify-center shadow-lg`}>
-                    <span className="text-white font-bold text-lg capitalize">{scores.dominant[0].toUpperCase()}</span>
-                  </div>
+                <motion.p 
+                  className="text-3xl font-bold text-gray-800 capitalize mb-2"
+                  animate={{ scale: [1, 1.05, 1] }}
+                  transition={{ duration: 2, repeat: Infinity, repeatDelay: 3 }}
+                >
+                  {scores.dominant} Prakriti
+                </motion.p>
+                <p className="text-sm text-gray-600 mb-4">{getDescription(scores.dominant)}</p>
+                <div className="flex justify-center">
+                  <motion.div 
+                    className={`w-16 h-16 ${getColorClass(scores.dominant)} rounded-full flex items-center justify-center shadow-xl`}
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.95 }}
+                    animate={{ 
+                      boxShadow: [
+                        '0 10px 20px rgba(0,0,0,0.1)',
+                        '0 20px 40px rgba(0,0,0,0.2)',
+                        '0 10px 20px rgba(0,0,0,0.1)'
+                      ]
+                    }}
+                    transition={{ duration: 3, repeat: Infinity }}
+                  >
+                    <span className="text-white font-bold text-xl capitalize">
+                      {scores.dominant[0].toUpperCase()}
+                    </span>
+                  </motion.div>
                 </div>
               </div>
-            </div>
+            </motion.div>
           </div>
         )}
 
-        {activeTab === 'charts' && chartData && barData && (
+        {activeTab === 'charts' && (
           <div className="space-y-8">
-            {/* Pie Chart */}
-            <div className="bg-gray-50 rounded-xl p-6">
+            {/* Custom Pie Chart */}
+            <motion.div 
+              className="bg-gray-50 rounded-xl p-6"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.5 }}
+            >
               <h4 className="text-lg font-semibold text-gray-800 mb-6 text-center">Prakriti Distribution</h4>
-              <div className="h-80 flex justify-center">
-                <div className="w-80">
-                  <Pie data={chartData} options={chartOptions} />
-                </div>
+              <CustomPieChart scores={scores} />
+              
+              {/* Enhanced Legend */}
+              <div className="flex justify-center mt-8 space-x-8">
+                {[
+                  { key: 'vata', color: '#3b82f6', percent: scores.percent.vata },
+                  { key: 'pitta', color: '#ef4444', percent: scores.percent.pitta },
+                  { key: 'kapha', color: '#22c55e', percent: scores.percent.kapha }
+                ].map((item, index) => (
+                  <motion.div 
+                    key={item.key}
+                    className="flex items-center bg-white p-3 rounded-lg shadow-sm border"
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: index * 0.1 + 0.5 }}
+                  >
+                    <div 
+                      className="w-4 h-4 rounded-full mr-3"
+                      style={{ backgroundColor: item.color }}
+                    />
+                    <div>
+                      <span className="text-sm font-medium capitalize">{item.key}</span>
+                      <span className="text-lg font-bold ml-2" style={{ color: item.color }}>
+                        {item.percent}%
+                      </span>
+                    </div>
+                  </motion.div>
+                ))}
               </div>
-            </div>
+            </motion.div>
 
-            {/* Bar Chart */}
-            <div className="bg-gray-50 rounded-xl p-6">
-              <h4 className="text-lg font-semibold text-gray-800 mb-6 text-center">Constitution Percentages</h4>
-              <div className="h-80">
-                <Bar data={barData} options={barOptions} />
-              </div>
-            </div>
+            {/* 3D Bar Chart */}
+            <motion.div 
+              className="bg-gray-50 rounded-xl p-6"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.5, delay: 0.3 }}
+            >
+              <h4 className="text-lg font-semibold text-gray-800 mb-6 text-center">Constitution Comparison</h4>
+              <Custom3DBarChart scores={scores} />
+            </motion.div>
 
-            {/* Chart Summary */}
+            {/* Chart Summary Cards */}
             <div className="grid grid-cols-3 gap-4">
-              <div className="text-center p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <div className="text-2xl font-bold text-blue-600">{scores.percent.vata}%</div>
-                <div className="text-sm text-blue-800 font-medium">Vata</div>
-                <div className="text-xs text-gray-600 mt-1">Air & Space</div>
-              </div>
-              <div className="text-center p-4 bg-red-50 rounded-lg border border-red-200">
-                <div className="text-2xl font-bold text-red-600">{scores.percent.pitta}%</div>
-                <div className="text-sm text-red-800 font-medium">Pitta</div>
-                <div className="text-xs text-gray-600 mt-1">Fire & Water</div>
-              </div>
-              <div className="text-center p-4 bg-green-50 rounded-lg border border-green-200">
-                <div className="text-2xl font-bold text-green-600">{scores.percent.kapha}%</div>
-                <div className="text-sm text-green-800 font-medium">Kapha</div>
-                <div className="text-xs text-gray-600 mt-1">Earth & Water</div>
-              </div>
+              {[
+                { key: 'vata', color: 'blue', percent: scores.percent.vata, element: 'Air & Space' },
+                { key: 'pitta', color: 'red', percent: scores.percent.pitta, element: 'Fire & Water' },
+                { key: 'kapha', color: 'green', percent: scores.percent.kapha, element: 'Earth & Water' }
+              ].map((item, index) => (
+                <motion.div
+                  key={item.key}
+                  className={`text-center p-6 bg-${item.color}-50 rounded-lg border border-${item.color}-200 shadow-sm`}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.1 + 1 }}
+                  whileHover={{ scale: 1.05 }}
+                >
+                  <motion.div 
+                    className={`text-3xl font-bold text-${item.color}-600 mb-2`}
+                    animate={{ scale: [1, 1.1, 1] }}
+                    transition={{ duration: 2, repeat: Infinity, delay: index * 0.5 }}
+                  >
+                    {item.percent}%
+                  </motion.div>
+                  <div className={`text-sm text-${item.color}-800 font-medium capitalize mb-1`}>
+                    {item.key}
+                  </div>
+                  <div className="text-xs text-gray-600">{item.element}</div>
+                </motion.div>
+              ))}
             </div>
           </div>
         )}
 
         {activeTab === 'therapies' && therapyRecommendations && (
-          <div className="space-y-6">
+          <motion.div 
+            className="space-y-6"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.5 }}
+          >
             {/* Primary Therapies */}
             <div>
               <h4 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                <div className="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
+                <motion.div 
+                  className="w-3 h-3 bg-green-500 rounded-full mr-2"
+                  animate={{ scale: [1, 1.3, 1] }}
+                  transition={{ duration: 1.5, repeat: Infinity }}
+                />
                 Recommended Therapies
               </h4>
               <div className="grid gap-3">
                 {therapyRecommendations.primary?.map((therapy: string, index: number) => (
-                  <div key={index} className="flex items-center p-4 bg-green-50 rounded-lg border border-green-200 hover:bg-green-100 transition-colors">
-                    <div className="w-2 h-2 bg-green-500 rounded-full mr-3"></div>
+                  <motion.div 
+                    key={index} 
+                    className="flex items-center p-4 bg-green-50 rounded-lg border border-green-200 hover:bg-green-100 transition-colors cursor-pointer"
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                    whileHover={{ scale: 1.02 }}
+                  >
+                    <div className="w-2 h-2 bg-green-500 rounded-full mr-3" />
                     <span className="text-gray-700 font-medium">{therapy}</span>
-                  </div>
+                  </motion.div>
                 ))}
               </div>
             </div>
@@ -365,15 +533,21 @@ const PrakritiSummaryCard: React.FC<Props> = ({ scores, therapyRecommendations }
             {therapyRecommendations.yoga && (
               <div>
                 <h4 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                  <div className="w-3 h-3 bg-blue-500 rounded-full mr-2"></div>
+                  <div className="w-3 h-3 bg-blue-500 rounded-full mr-2" />
                   Yoga Practices
                 </h4>
                 <div className="grid gap-3">
                   {therapyRecommendations.yoga.map((practice: string, index: number) => (
-                    <div key={index} className="flex items-center p-3 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 transition-colors">
+                    <motion.div 
+                      key={index} 
+                      className="flex items-center p-3 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 transition-colors"
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.1 }}
+                    >
                       <span className="text-blue-600 mr-3 text-lg">🧘</span>
                       <span className="text-gray-700">{practice}</span>
-                    </div>
+                    </motion.div>
                   ))}
                 </div>
               </div>
@@ -383,15 +557,21 @@ const PrakritiSummaryCard: React.FC<Props> = ({ scores, therapyRecommendations }
             {therapyRecommendations.lifestyle && (
               <div>
                 <h4 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                  <div className="w-3 h-3 bg-orange-500 rounded-full mr-2"></div>
+                  <div className="w-3 h-3 bg-orange-500 rounded-full mr-2" />
                   Lifestyle Recommendations
                 </h4>
                 <div className="space-y-3">
                   {therapyRecommendations.lifestyle.map((tip: string, index: number) => (
-                    <div key={index} className="flex items-start p-3 bg-orange-50 rounded-lg border border-orange-200">
+                    <motion.div 
+                      key={index} 
+                      className="flex items-start p-3 bg-orange-50 rounded-lg border border-orange-200"
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.1 }}
+                    >
                       <span className="text-orange-500 mr-3 mt-1 text-sm">●</span>
                       <span className="text-gray-700">{tip}</span>
-                    </div>
+                    </motion.div>
                   ))}
                 </div>
               </div>
@@ -399,26 +579,34 @@ const PrakritiSummaryCard: React.FC<Props> = ({ scores, therapyRecommendations }
 
             {/* Confidence Level */}
             {therapyRecommendations.confidence_level && (
-              <div className="p-6 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border border-gray-200">
+              <motion.div 
+                className="p-6 bg-gradient-to-r from-gray-50 to-blue-50 rounded-lg border border-gray-200"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.5 }}
+              >
                 <div className="flex justify-between items-center mb-4">
                   <span className="text-lg font-semibold text-gray-700">Recommendation Confidence</span>
-                  <span className={`px-4 py-2 rounded-full text-sm font-bold ${
-                    therapyRecommendations.confidence_level === 'high' 
-                      ? 'bg-green-100 text-green-800 border border-green-300'
-                      : therapyRecommendations.confidence_level === 'medium'
-                      ? 'bg-yellow-100 text-yellow-800 border border-yellow-300'
-                      : 'bg-red-100 text-red-800 border border-red-300'
-                  }`}>
+                  <motion.span 
+                    className={`px-4 py-2 rounded-full text-sm font-bold ${
+                      therapyRecommendations.confidence_level === 'high' 
+                        ? 'bg-green-100 text-green-800 border border-green-300'
+                        : therapyRecommendations.confidence_level === 'medium'
+                        ? 'bg-yellow-100 text-yellow-800 border border-yellow-300'
+                        : 'bg-red-100 text-red-800 border border-red-300'
+                    }`}
+                    whileHover={{ scale: 1.05 }}
+                  >
                     {therapyRecommendations.confidence_level.toUpperCase()}
-                  </span>
+                  </motion.span>
                 </div>
                 <div className="flex justify-between items-center text-sm text-gray-600">
                   <span>Recommended Duration:</span>
                   <span className="font-semibold">{therapyRecommendations.recommended_duration || '8-12 weeks'}</span>
                 </div>
-              </div>
+              </motion.div>
             )}
-          </div>
+          </motion.div>
         )}
       </div>
     </div>

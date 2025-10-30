@@ -10,28 +10,13 @@ import crypto from 'crypto';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-key';
 
-// In-memory user storage for development fallback
-const memoryUserStore = new Map<string, {
-  id: string;
-  phone?: string;
-  email?: string;
-  first_name: string;
-  last_name: string;
-  date_of_birth?: string;
-  gender?: string;
-  emergency_contact?: string;
-  emergency_name?: string;
-  address?: string;
-  role: string;
-  is_verified: boolean;
-  consent_given: boolean;
-  consent_timestamp: string;
-  password_hash?: string;
-  created_at: string;
-}>();
+// In-memory user storage for dev fallback
+const memoryUserStore = new Map<string, any>();
 
 export const authController = {
-  // Send OTP — supports phone OR email
+  // ======================
+  // SEND OTP
+  // ======================
   async sendOTP(req: Request, res: Response) {
     try {
       const { phone, email } = req.body;
@@ -40,10 +25,8 @@ export const authController = {
       }
 
       const identifierRaw = (phone ?? email) as string;
-      console.log('📱/📧 OTP request for:', identifierRaw);
-
-      // Normalize and validate identifier
       const normalized = otpService.normalizeIdentifier(identifierRaw);
+
       if (normalized.phone) {
         if (!otpService.validatePhoneNumber(normalized.phone)) {
           return res.status(400).json({ error: 'Invalid Indian phone number' });
@@ -52,64 +35,42 @@ export const authController = {
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized.email)) {
           return res.status(400).json({ error: 'Invalid email address' });
         }
-      } else {
-        return res.status(400).json({ error: 'Invalid identifier' });
       }
 
       const otp = otpService.generateOTP();
-      console.log(`🔐 Generated OTP: ${otp} for ${identifierRaw}`);
 
-      // store OTP in Supabase (returns boolean)
-      try {
-        const stored = await otpService.storeOTP(identifierRaw, otp);
-        if (!stored) {
-          console.error('❌ storeOTP returned false - aborting OTP send');
-          return res.status(502).json({ error: 'Failed to store OTP' });
-        }
-      } catch (e: any) {
-        console.error('❌ storeOTP threw error:', e?.message ?? e);
-        return res.status(502).json({ error: 'Failed to store OTP', detail: e?.message });
-      }
+      // FIXED: always use formatted key for DB storage
+      const storeKey = normalized.phone
+        ? otpService.formatPhoneForStorage(normalized.phone)
+        : normalized.email!;
+      await otpService.storeOTP(storeKey, otp);
 
-      // If phone, send/log via smsService (dev-mode)
       if (normalized.phone) {
-        try {
-          await smsService.sendOTP(normalized.phone, otp);
-        } catch (smsErr) {
-          console.warn('⚠️ SMS send failed (non-fatal):', smsErr);
-        }
+        await smsService.sendOTP(normalized.phone, otp);
       }
-
-      // If email provided, attempt to send email (non-blocking)
       if (normalized.email) {
-        try {
-          await sendMail({
-            to: normalized.email,
-            subject: `Your AyurConnect verification code: ${otp}`,
-            html: `<p>Your verification code is <strong>${otp}</strong>. It will expire in 5 minutes.</p>`,
-            text: `Your AyurConnect verification code is: ${otp}`
-          });
-          console.log('📧 OTP email sent to', normalized.email);
-        } catch (mailErr) {
-          console.warn('⚠️ Email send failed (non-fatal):', mailErr);
-        }
+        await sendMail({
+          to: normalized.email,
+          subject: `Your SwasthyaSync verification code: ${otp}`,
+          text: `Your verification code is ${otp}`,
+          html: `<p>Your verification code is <b>${otp}</b></p>`
+        });
       }
 
-      // In dev mode return OTP for display
-      const isDev = process.env.NODE_ENV !== 'production';
       return res.json({
         success: true,
         message: 'OTP sent successfully',
-        ttl_seconds: 300,
-        ...(isDev && { otp, displayOTP: true })
+        ...(process.env.NODE_ENV !== 'production' && { otp })
       });
-    } catch (error: any) {
-      console.error('❌ Send OTP error (top-level):', error);
-      return res.status(500).json({ error: 'Failed to send OTP', details: error?.message });
+    } catch (err: any) {
+      console.error('❌ sendOTP error:', err);
+      return res.status(500).json({ error: 'Failed to send OTP' });
     }
   },
 
-  // Verify OTP — supports phone OR email
+  // ======================
+  // VERIFY OTP
+  // ======================
   async verifyOTP(req: Request, res: Response) {
     try {
       const { phone, email, otp } = req.body;
@@ -117,436 +78,329 @@ export const authController = {
         return res.status(400).json({ error: 'Phone/email and OTP are required' });
       }
 
-      const identifier = phone ?? email;
-      console.log('🔐 Verifying OTP for:', identifier);
+      const identifierRaw = phone ?? email;
+      const normalized = otpService.normalizeIdentifier(identifierRaw);
 
-      const isValid = await otpService.verifyOTP(identifier, otp);
+      let lookupPhone: string | undefined;
+      let lookupEmail: string | undefined;
+
+      if (normalized.phone) {
+        if (!otpService.validatePhoneNumber(normalized.phone)) {
+          return res.status(400).json({ error: 'Invalid Indian phone number' });
+        }
+        lookupPhone = otpService.formatPhoneForStorage(normalized.phone);
+      }
+      if (normalized.email) {
+        lookupEmail = normalized.email.toLowerCase();
+      }
+
+      const isValid = await otpService.verifyOTP(lookupPhone ?? lookupEmail!, otp);
       if (!isValid) {
         return res.status(401).json({ error: 'Invalid or expired OTP' });
       }
 
-      console.log('✅ OTP verified successfully');
-
-      // Now check if user exists (by phone or email)
-      try {
-        // Try database first
-        let query = supabase.from('users').select('*');
-        if (phone) query = query.eq('phone', otpService.formatPhoneForStorage(phone));
-        if (email) query = query.eq('email', (email as string).toLowerCase());
-
-        const { data: existingUser, error } = await query.single();
-
-        if (existingUser) {
-          const token = jwt.sign(
-            {
-              id: existingUser.id,
-              phone: existingUser.phone,
-              email: existingUser.email,
-              role: existingUser.role
-            },
-            JWT_SECRET,
-            { expiresIn: '7d' }
-          );
-
-          return res.json({
-            success: true,
-            new: false,
-            token,
-            user: {
-              id: existingUser.id,
-              name: `${existingUser.first_name} ${existingUser.last_name}`,
-              phone: existingUser.phone,
-              email: existingUser.email,
-              role: existingUser.role
-            }
-          });
-        }
-      } catch (dbErr: any) {
-        console.log('Database check failed, checking memory store:', dbErr?.message ?? dbErr);
-        
-        // Fallback to memory store
-        const key = phone ? otpService.formatPhoneForStorage(phone) : email?.toLowerCase();
-        const memoryUser = Array.from(memoryUserStore.values()).find(user => 
-          (phone && user.phone === key) || (email && user.email === key)
-        );
-
-        if (memoryUser) {
-          const token = jwt.sign(
-            {
-              id: memoryUser.id,
-              phone: memoryUser.phone,
-              email: memoryUser.email,
-              role: memoryUser.role
-            },
-            JWT_SECRET,
-            { expiresIn: '7d' }
-          );
-
-          return res.json({
-            success: true,
-            new: false,
-            token,
-            user: {
-              id: memoryUser.id,
-              name: `${memoryUser.first_name} ${memoryUser.last_name}`,
-              phone: memoryUser.phone,
-              email: memoryUser.email,
-              role: memoryUser.role
-            }
-          });
-        }
+      // Look for existing user
+      let query = supabase.from('users').select('*');
+      if (lookupPhone && lookupEmail) {
+        query = query.or(`phone.eq.${lookupPhone},email.eq.${lookupEmail}` as string);
+      } else if (lookupPhone) {
+        query = query.eq('phone', lookupPhone);
+      } else if (lookupEmail) {
+        query = query.eq('email', lookupEmail);
       }
 
-      // If user does not exist, instruct client to register
+      const { data: existingUser } = await query.maybeSingle();
+
+      if (existingUser) {
+        const token = jwt.sign(
+          { id: existingUser.id, phone: existingUser.phone, email: existingUser.email, role: existingUser.role },
+          JWT_SECRET,
+          { expiresIn: '7d' }
+        );
+        return res.json({
+          success: true,
+          new: false,
+          token,
+          user: {
+            id: existingUser.id,
+            name: `${existingUser.first_name} ${existingUser.last_name}`,
+            phone: existingUser.phone,
+            email: existingUser.email,
+            role: existingUser.role,
+            onboarding: {
+              personal_details_completed: !!existingUser.personal_details_completed,
+              questionnaire_completed: !!existingUser.questionnaire_completed,
+              onboarding_completed: !!existingUser.onboarding_completed
+            }
+          }
+        });
+      }
+
       return res.json({
         success: true,
         new: true,
         message: 'OTP verified. Please complete registration.',
-        identifier: identifier
+        identifier: identifierRaw
       });
-    } catch (error: any) {
-      console.error('❌ Verify OTP error:', error);
+    } catch (err: any) {
+      console.error('❌ verifyOTP error:', err);
       return res.status(500).json({ error: 'Failed to verify OTP' });
     }
   },
 
-  // Register new patient with memory fallback
+  // ======================
+  // REGISTER USER
+  // ======================
   async register(req: Request, res: Response) {
+  try {
+    if ((req as any).user) {
+      return res.status(400).json({ error: 'Already authenticated. Please log out before registering a new user.' });
+    }
+
+    const { 
+      phone, firstName, lastName, email, consent, dateOfBirth, gender, address,
+      emergencyContact, emergencyName, emergencyRelation,
+      occupation, chronicConditions, currentMedications, allergies,
+      previousSurgeries, familyHistory, exerciseFrequency, sleepPattern,
+      dietaryPreferences, smokingStatus, alcoholConsumption, stressLevel,
+      previousAyurvedicTreatment, specificConcerns, treatmentGoals
+    } = req.body;
+
+    if (!consent) {
+      return res.status(400).json({ error: 'Consent is required' });
+    }
+
+    let normalizedPhone: string | null = null;
+    if (phone) {
+      const norm = otpService.normalizeIdentifier(phone);
+      if (norm.phone) {
+        if (!otpService.validatePhoneNumber(norm.phone)) {
+          return res.status(400).json({ error: 'Invalid phone number' });
+        }
+        normalizedPhone = otpService.formatPhoneForStorage(norm.phone);
+      }
+    }
+
+    if (!normalizedPhone && !email) {
+      return res.status(400).json({ error: 'Phone or email required' });
+    }
+
+    // Check for existing user
+    const orClauses: string[] = [];
+    if (normalizedPhone) orClauses.push(`phone.eq.${normalizedPhone}`);
+    if (email) orClauses.push(`email.eq.${email.toLowerCase()}`);
+    const orQuery: string = orClauses.join(',');
+
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('*')
+      .or(orQuery as string)
+      .maybeSingle();
+
+    if (existingUser) {
+      const token = jwt.sign(
+        { id: existingUser.id, phone: existingUser.phone, email: existingUser.email, role: existingUser.role },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+      return res.json({ success: true, token, user: existingUser });
+    }
+
+    const userId = crypto.randomUUID();
+    const now = new Date().toISOString();
+
+    // Create complete user record with all provided data
+    const userData = {
+      id: userId,
+      phone: normalizedPhone,
+      first_name: firstName,
+      last_name: lastName,
+      email: email ? email.toLowerCase() : null,
+      date_of_birth: dateOfBirth,
+      gender: gender,
+      address: address,
+      role: 'patient',
+      consent_given: consent,
+      consent_timestamp: now,
+      is_verified: true,
+      personal_details_completed: true,
+      questionnaire_completed: false,
+      onboarding_completed: false,
+      created_at: now,
+      // Emergency contact
+      emergency_contact: emergencyContact,
+      emergency_name: emergencyName,
+      emergency_relation: emergencyRelation,
+      // Health & lifestyle data
+      occupation: occupation,
+      chronic_conditions: chronicConditions || [],
+      current_medications: currentMedications || [],
+      allergies: allergies || [],
+      previous_surgeries: previousSurgeries || [],
+      family_history: familyHistory || [],
+      exercise_frequency: exerciseFrequency,
+      sleep_pattern: sleepPattern,
+      dietary_preferences: dietaryPreferences || [],
+      smoking_status: smokingStatus,
+      alcohol_consumption: alcoholConsumption,
+      stress_level: stressLevel,
+      previous_ayurvedic_treatment: previousAyurvedicTreatment,
+      specific_concerns: specificConcerns || [],
+      treatment_goals: treatmentGoals || []
+    };
+
+    const { data: newUser, error } = await supabase
+      .from('users')
+      .insert(userData)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Registration error:', error);
+      throw error;
+    }
+
+    const token = jwt.sign({ id: newUser.id, phone: newUser.phone, email: newUser.email, role: newUser.role }, JWT_SECRET, { expiresIn: '7d' });
+    return res.json({ success: true, token, user: newUser });
+  } catch (err: any) {
+    console.error('Register error:', err);
+    return res.status(500).json({ error: 'Registration failed', details: err?.message });
+  }
+},
+  // ======================
+  // GET PROFILE
+  // ======================
+  async getProfile(req: Request, res: Response) {
     try {
-      const {
-        phone,
-        firstName,
-        lastName,
-        dateOfBirth,
-        gender,
-        email,
-        emergencyContact,
-        emergencyName,
-        address,
-        consent
-      } = req.body;
+      const userId = (req as any).user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-      if (!consent) {
-        return res.status(400).json({ error: 'Consent is required' });
-      }
+      const { data: user } = await supabase.from('users').select('*').eq('id', userId).single();
+      if (!user) return res.status(404).json({ error: 'User not found' });
 
-      // Normalize phone if present
-      let normalizedPhone: string | null = null;
-      if (phone) {
-        const cleaned = String(phone).replace(/\D/g, '');
-        normalizedPhone = cleaned;
-        if (normalizedPhone.startsWith('91') && normalizedPhone.length === 12) {
-          normalizedPhone = normalizedPhone.substring(2);
-        }
-        // basic validation if phone provided
-        if (normalizedPhone.length !== 10 || !/^[6-9]\d{9}$/.test(normalizedPhone)) {
-          return res.status(400).json({ error: 'Invalid Indian phone number' });
-        }
-      }
-
-      // require at least one identifier: phone or email
-      if (!normalizedPhone && !email) {
-        return res.status(400).json({ error: 'Either phone or email is required for registration' });
-      }
-
-      const userId = crypto.randomUUID();
-      const now = new Date().toISOString();
-
-      // Prepare user data
-      const userData = {
-        id: userId,
-        phone: normalizedPhone || undefined,
-        first_name: firstName,
-        last_name: lastName,
-        date_of_birth: dateOfBirth || undefined,
-        gender: gender || undefined,
-        email: email || undefined,
-        emergency_contact: emergencyContact || undefined,
-        emergency_name: emergencyName || undefined,
-        address: address || undefined,
-        role: 'patient',
-        consent_given: consent,
-        consent_timestamp: now,
-        is_verified: true,
-        created_at: now
-      };
-
-      let newUser: any = null;
-
-      // Try database first
-      try {
-        const insertPayload = {
-          phone: normalizedPhone || null,
-          first_name: firstName,
-          last_name: lastName,
-          date_of_birth: dateOfBirth || null,
-          gender: gender || null,
-          email: email || null,
-          emergency_contact: emergencyContact || null,
-          emergency_name: emergencyName || null,
-          address: address || null,
-          role: 'patient',
-          consent_given: consent,
-          consent_timestamp: now,
-          is_verified: true
-        };
-
-        const { data: dbUser, error } = await supabase
-          .from('users')
-          .insert(insertPayload)
-          .select()
-          .single();
-
-        if (error) {
-          throw new Error(`Database error: ${error.message}`);
-        }
-
-        newUser = dbUser;
-        console.log('✅ User created in database:', newUser.id);
-
-      } catch (dbError: any) {
-        console.warn('Database registration failed, using memory fallback:', dbError.message);
-        
-        // Fallback to memory storage
-        memoryUserStore.set(userId, userData as any);
-        newUser = userData;
-        console.log('✅ User created in memory (fallback):', userId);
-        console.warn('⚠️ User stored in memory - will be lost on server restart!');
-      }
-
-      if (!newUser) {
-        throw new Error('Failed to create user in both database and memory');
-      }
-
-      // Generate JWT token
-      const tokenPayload: Record<string, any> = {
-        id: newUser.id,
-        role: newUser.role
-      };
-      if (newUser.phone) tokenPayload.phone = newUser.phone;
-      if (newUser.email) tokenPayload.email = newUser.email;
-
-      const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: '7d' });
-
-      // Non-blocking: attempt to send welcome email if we have an email
-      if (newUser.email) {
-        (async () => {
-          try {
-            const html = `
-              <div style="font-family: Arial, sans-serif; line-height:1.4; color:#111;">
-                <h2>Welcome to AyurConnect${newUser.first_name ? ', ' + newUser.first_name : ''}!</h2>
-                <p>Thank you for registering. We're excited to help you on your health journey.</p>
-                <p>If you have any questions, reply to this email and our support team will help you.</p>
-                <p style="font-size:13px;color:#666;margin-top:16px">— AyurConnect Team</p>
-              </div>
-            `;
-            await sendMail({
-              to: newUser.email,
-              subject: 'Welcome to AyurConnect',
-              html,
-              text: `Welcome to AyurConnect${newUser.first_name ? ', ' + newUser.first_name : ''}!`
-            });
-            console.log('✅ Welcome email sent to', newUser.email);
-          } catch (emailErr) {
-            console.warn('⚠️ Failed to send welcome email (non-fatal):', emailErr);
-          }
-        })();
-      }
-
-      // Respond to client
-      return res.json({
-        success: true,
-        token,
-        user: {
-          id: newUser.id,
-          name: `${newUser.first_name} ${newUser.last_name}`,
-          phone: newUser.phone ?? null,
-          email: newUser.email ?? null,
-          role: newUser.role
-        }
-      });
-    } catch (error: any) {
-      console.error('❌ Registration error:', error);
-      return res.status(500).json({
-        error: 'Registration failed',
-        details: process.env.NODE_ENV === 'development' ? error?.message : undefined
-      });
+      return res.json({ success: true, user });
+    } catch (err: any) {
+      console.error('❌ getProfile error:', err);
+      return res.status(500).json({ error: 'Failed to fetch profile' });
     }
   },
 
-  // Login for practitioner/admin (unchanged)
+
+  // Add this new method to authController object
+async updateProfile(req: Request, res: Response) {
+  try {
+    const userId = (req as any).user?.id;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const {
+      // Personal details
+      firstName, lastName, dateOfBirth, gender, address,
+      // Emergency contact
+      emergencyContact, emergencyName, emergencyRelation,
+      // Health information
+      occupation, chronicConditions, currentMedications, allergies,
+      previousSurgeries, familyHistory,
+      // Lifestyle
+      exerciseFrequency, sleepPattern, dietaryPreferences,
+      smokingStatus, alcoholConsumption, stressLevel,
+      // Ayurvedic
+      previousAyurvedicTreatment, specificConcerns, treatmentGoals
+    } = req.body;
+
+    const updateData: any = {
+      updated_at: new Date().toISOString()
+    };
+
+    // Only update provided fields
+    if (firstName) updateData.first_name = firstName;
+    if (lastName) updateData.last_name = lastName;
+    if (dateOfBirth) updateData.date_of_birth = dateOfBirth;
+    if (gender) updateData.gender = gender;
+    if (address) updateData.address = address;
+    if (emergencyContact) updateData.emergency_contact = emergencyContact;
+    if (emergencyName) updateData.emergency_name = emergencyName;
+    if (emergencyRelation) updateData.emergency_relation = emergencyRelation;
+    if (occupation) updateData.occupation = occupation;
+    if (exerciseFrequency) updateData.exercise_frequency = exerciseFrequency;
+    if (sleepPattern) updateData.sleep_pattern = sleepPattern;
+    if (smokingStatus) updateData.smoking_status = smokingStatus;
+    if (alcoholConsumption) updateData.alcohol_consumption = alcoholConsumption;
+    if (stressLevel) updateData.stress_level = stressLevel;
+    if (previousAyurvedicTreatment !== undefined) updateData.previous_ayurvedic_treatment = previousAyurvedicTreatment;
+
+    // Handle JSON arrays
+    if (chronicConditions) updateData.chronic_conditions = chronicConditions;
+    if (currentMedications) updateData.current_medications = currentMedications;
+    if (allergies) updateData.allergies = allergies;
+    if (previousSurgeries) updateData.previous_surgeries = previousSurgeries;
+    if (familyHistory) updateData.family_history = familyHistory;
+    if (dietaryPreferences) updateData.dietary_preferences = dietaryPreferences;
+    if (specificConcerns) updateData.specific_concerns = specificConcerns;
+    if (treatmentGoals) updateData.treatment_goals = treatmentGoals;
+
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update(updateData)
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return res.json({ success: true, user: updatedUser });
+  } catch (err: any) {
+    console.error('Update profile error:', err);
+    return res.status(500).json({ error: 'Failed to update profile' });
+  }
+},
+
+  // ======================
+  // LOGIN (for admin/practitioner)
+  // ======================
   async login(req: Request, res: Response) {
     try {
       const { email, password } = req.body;
-
       if (!email || !password) {
-        return res.status(400).json({ error: 'Email and password are required' });
+        return res.status(400).json({ error: 'Email and password required' });
       }
 
-      // For development - allow default admin login
-      if (email === 'admin@ayurconnect.com' && password === 'admin123') {
-        let admin: any = null;
+      const { data: user } = await supabase.from('users').select('*').eq('email', email).maybeSingle();
+      if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
-        // Try database first
-        try {
-          const { data: dbAdmin } = await supabase
-            .from('users')
-            .select('*')
-            .eq('email', email)
-            .single();
-          
-          admin = dbAdmin;
-        } catch (dbErr) {
-          console.log('Admin not found in database, checking memory...');
-          
-          // Check memory store
-          admin = Array.from(memoryUserStore.values()).find(user => user.email === email);
-        }
-
-        if (!admin) {
-          // Create admin in memory if not found
-          const hashedPassword = await bcrypt.hash(password, 10);
-          const adminId = crypto.randomUUID();
-          const adminData = {
-            id: adminId,
-            phone: '9999999999',
-            email: email,
-            password_hash: hashedPassword,
-            first_name: 'Admin',
-            last_name: 'User',
-            role: 'admin',
-            is_verified: true,
-            consent_given: true,
-            consent_timestamp: new Date().toISOString(),
-            created_at: new Date().toISOString()
-          };
-
-          try {
-            const { data: newAdmin } = await supabase
-              .from('users')
-              .insert(adminData)
-              .select()
-              .single();
-            admin = newAdmin;
-          } catch (dbErr) {
-            console.log('Creating admin in memory fallback');
-            memoryUserStore.set(adminId, adminData);
-            admin = adminData;
-          }
-        }
-
-        if (admin) {
-          const token = jwt.sign(
-            { id: admin.id, email: admin.email, role: admin.role },
-            JWT_SECRET,
-            { expiresIn: '7d' }
-          );
-
-          return res.json({
-            success: true,
-            token,
-            user: {
-              id: admin.id,
-              name: `${admin.first_name} ${admin.last_name}`,
-              email: admin.email,
-              role: admin.role
-            }
-          });
-        }
-      }
-
-      // Normal login flow - try database first, then memory
-      let user: any = null;
-      
-      try {
-        const { data: dbUser, error } = await supabase
-          .from('users')
-          .select('*')
-          .eq('email', email)
-          .single();
-        user = dbUser;
-      } catch (dbErr) {
-        // Check memory store
-        user = Array.from(memoryUserStore.values()).find(u => u.email === email);
-      }
-
-      if (!user) {
-        return res.status(401).json({ error: 'Invalid credentials' });
-      }
-
-      // Check if user is practitioner or admin
       if (user.role === 'patient') {
-        return res.status(403).json({ error: 'Please use phone OTP to login' });
+        return res.status(403).json({ error: 'Patients must login with OTP' });
       }
 
-      // Verify password if exists
-      if (user.password_hash) {
-        const isValidPassword = await bcrypt.compare(password, user.password_hash);
-        if (!isValidPassword) {
-          return res.status(401).json({ error: 'Invalid credentials' });
-        }
-      }
+      const valid = user.password_hash ? await bcrypt.compare(password, user.password_hash) : false;
+      if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
 
-      // Generate token
-      const token = jwt.sign(
-        { id: user.id, email: user.email, role: user.role },
-        JWT_SECRET,
-        { expiresIn: '7d' }
-      );
-
-      return res.json({
-        success: true,
-        token,
-        user: {
-          id: user.id,
-          name: `${user.first_name} ${user.last_name}`,
-          email: user.email,
-          role: user.role
-        }
-      });
-    } catch (error: any) {
-      console.error('Login error:', error);
-      return res.status(500).json({
-        error: 'Login failed',
-        details: process.env.NODE_ENV === 'development' ? error?.message : undefined
-      });
+      const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+      return res.json({ success: true, token, user });
+    } catch (err: any) {
+      console.error('❌ login error:', err);
+      return res.status(500).json({ error: 'Login failed' });
     }
   },
 
-  // Refresh token
+  // ======================
+  // REFRESH TOKEN
+  // ======================
   async refreshToken(req: Request, res: Response) {
     try {
       const { token } = req.body;
-
-      if (!token) {
-        return res.status(400).json({ error: 'Token is required' });
-      }
-
       const decoded = jwt.verify(token, JWT_SECRET) as any;
-
-      const newToken = jwt.sign(
-        {
-          id: decoded.id,
-          phone: decoded.phone || decoded.email,
-          role: decoded.role
-        },
-        JWT_SECRET,
-        { expiresIn: '7d' }
-      );
-
+      const newToken = jwt.sign({ id: decoded.id, phone: decoded.phone, email: decoded.email, role: decoded.role }, JWT_SECRET, { expiresIn: '7d' });
       return res.json({ success: true, token: newToken });
-    } catch (error: any) {
-      console.error('Refresh token error:', error);
+    } catch {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
   },
 
-  // Logout
+  // ======================
+  // LOGOUT
+  // ======================
   async logout(_req: Request, res: Response) {
-    return res.json({
-      success: true,
-      message: 'Logged out successfully'
-    });
+    return res.json({ success: true, message: 'Logged out successfully' });
   }
 };
 

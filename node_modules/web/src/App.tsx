@@ -1,6 +1,9 @@
 // apps/web/src/App.tsx
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { supabase, authService, User } from './utils/supabase';
+import { ToastProvider } from './components/ToastProvider';
+import { Toaster } from 'react-hot-toast';
 
 // Intro / Landing
 import Intro from './pages/auth/Intro';
@@ -16,13 +19,9 @@ import PatientDashboard from './pages/patient/Dashboard';
 import PractitionerDashboard from './pages/practitioner/Dashboard';
 import AdminDashboard from './pages/admin/Dashboard';
 
-// Protected Route Component
-interface User {
-  id: string;
-  role: 'patient' | 'practitioner' | 'admin';
-  name: string;
-}
+import PractitionerLogin from './pages/auth/PractitionerLogin';
 
+// Protected Route Component
 const ProtectedRoute: React.FC<{ 
   children: React.ReactNode;
   allowedRoles?: string[];
@@ -31,14 +30,44 @@ const ProtectedRoute: React.FC<{
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check for user in localStorage
-    const storedUser = localStorage.getItem('user');
-    const token = localStorage.getItem('authToken');
-    
-    if (storedUser && token) {
-      setUser(JSON.parse(storedUser));
-    }
-    setLoading(false);
+    const checkAuth = async () => {
+      try {
+        console.log('[ProtectedRoute] Checking authentication...');
+        const currentUser = await authService.getCurrentUser();
+        setUser(currentUser);
+        
+        if (currentUser) {
+          console.log('[ProtectedRoute] User authenticated:', currentUser.id, 'Role:', currentUser.role);
+        } else {
+          console.log('[ProtectedRoute] No authenticated user found');
+        }
+      } catch (error) {
+        console.error('[ProtectedRoute] Auth check error:', error);
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    checkAuth();
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('[ProtectedRoute] Auth state changed:', event);
+        
+        if (event === 'SIGNED_IN' && session) {
+          const currentUser = await authService.getCurrentUser();
+          setUser(currentUser);
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null);
+        }
+      }
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   if (loading) {
@@ -54,18 +83,18 @@ const ProtectedRoute: React.FC<{
   }
 
   if (allowedRoles && !allowedRoles.includes(user.role)) {
-    // Redirect to appropriate dashboard based on role
-    switch (user.role) {
-      case 'admin':
-        return <Navigate to="/admin/dashboard" replace />;
-      case 'practitioner':
-        return <Navigate to="/practitioner/dashboard" replace />;
-      case 'patient':
-        return <Navigate to="/patient/dashboard" replace />;
-      default:
-        return <Navigate to="/auth/phone" replace />;
-    }
+  switch (user.role) {
+    case 'admin':
+      return <Navigate to="/admin/dashboard" replace />;
+    case 'practitioner':
+      return <Navigate to="/practitioner/dashboard" replace />;
+    case 'patient':
+       return <Navigate to="/patient/dashboard" replace />;   // ✅ FIXED
+    default:
+      return <Navigate to="/auth/phone" replace />;
   }
+}
+
 
   return <>{children}</>;
 };
@@ -73,13 +102,30 @@ const ProtectedRoute: React.FC<{
 // Universal Dashboard Component (role-based view)
 const UniversalDashboard: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
+    const getUser = async () => {
+      try {
+        const currentUser = await authService.getCurrentUser();
+        setUser(currentUser);
+      } catch (error) {
+        console.error('[UniversalDashboard] Error getting user:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    getUser();
   }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+      </div>
+    );
+  }
 
   if (!user) {
     return <Navigate to="/auth/phone" replace />;
@@ -101,8 +147,9 @@ const UniversalDashboard: React.FC = () => {
 function App() {
   return (
     <Router>
-      <div className="min-h-screen bg-gray-50">
-        <Routes>
+      <ToastProvider>
+        <div className="min-h-screen">
+          <Routes>
           {/* Intro / Landing Page (default) */}
           <Route path="/" element={<Intro />} />
 
@@ -112,6 +159,10 @@ function App() {
           <Route path="/auth/register" element={<PatientRegister />} />
           <Route path="/auth/prakriti-questionnaire" element={<PrakritiQuestionnaire />} />
           
+           {/* Practitioner Login Route */}
+            <Route path="/auth/practitioner" element={<PractitionerLogin />} />
+            
+            
           {/* Universal Dashboard - shows different content based on role */}
           <Route 
             path="/dashboard" 
@@ -126,24 +177,30 @@ function App() {
           <Route 
             path="/patient/*" 
             element={
-              <ProtectedRoute allowedRoles={['patient']}>
-                <Routes>
-                  <Route path="dashboard" element={<PatientDashboard />} />
-                </Routes>
-              </ProtectedRoute>
+              <Routes>
+                <Route 
+                  path="dashboard" 
+                  element={
+                    <ProtectedRoute allowedRoles={['patient']}>
+                      <PatientDashboard />
+                    </ProtectedRoute>
+                  } 
+                />
+              </Routes>
             } 
           />
+
           
-          <Route 
-            path="/practitioner/*" 
-            element={
-              <ProtectedRoute allowedRoles={['practitioner']}>
-                <Routes>
-                  <Route path="dashboard" element={<PractitionerDashboard />} />
-                </Routes>
-              </ProtectedRoute>
-            } 
-          />
+            <Route 
+    path="/practitioner/*" 
+    element={
+      <ProtectedRoute allowedRoles={['practitioner']}>
+        <Routes>
+          <Route path="dashboard" element={<PractitionerDashboard />} />
+        </Routes>
+      </ProtectedRoute>
+    } 
+  />
           
           <Route 
             path="/admin/*" 
@@ -156,10 +213,12 @@ function App() {
             } 
           />
           
-          {/* Default fallback: keep existing behaviour — navigate to phone entry */}
+          {/* Default fallback: navigate to phone entry */}
           <Route path="*" element={<Navigate to="/auth/phone" replace />} />
         </Routes>
-      </div>
+        </div>
+        <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
+      </ToastProvider>
     </Router>
   );
 }

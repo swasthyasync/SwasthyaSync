@@ -6,6 +6,14 @@ export interface Answer {
   weight: number;
 }
 
+export interface MLPrediction {
+  predicted: 'vata' | 'pitta' | 'kapha';
+  confidence: number;
+  probabilities: {
+    [key: string]: number;
+  };
+}
+
 export interface PrakritiScores {
   vata: number;
   pitta: number;
@@ -18,6 +26,7 @@ export interface PrakritiScores {
     pitta: number;
     kapha: number;
   };
+  ml_prediction?: MLPrediction;
 }
 
 export interface MentalHealthScore {

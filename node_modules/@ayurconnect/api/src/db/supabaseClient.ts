@@ -1,22 +1,23 @@
 // packages/api/src/db/supabaseClient.ts
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import path from 'path';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
+import fetch from 'node-fetch';
 
-// Import and setup node-fetch for Node.js compatibility
-import fetch, { Headers, Request, Response } from 'node-fetch';
+// Always load .env explicitly
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-// Polyfill fetch for Node.js environment
-if (!globalThis.fetch) {
-  globalThis.fetch = fetch as any;
-  globalThis.Headers = Headers as any;
-  globalThis.Request = Request as any;
-  globalThis.Response = Response as any;
+// Config values
+const supabaseUrl = "https://yrgmfzkfrezfminbdfnz.supabase.co";
+const supabaseServiceKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlyZ21memtmcmV6Zm1pbmJkZm56Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NzcwMjMxNiwiZXhwIjoyMDczMjc4MzE2fQ.HrEtLWAy8kz5pkI722K-tiL8Ckp-DHIXcjVzWfpDBuY";
+
+if (!supabaseUrl || !supabaseServiceKey) {
+    console.error('❌ Missing required environment variables:');
+    if (!supabaseUrl) console.error('   - SUPABASE_URL');
+    if (!supabaseServiceKey) console.error('   - SUPABASE_SERVICE_ROLE_KEY');
+    process.exit(1);
 }
-
-dotenv.config();
-
-const supabaseUrl = (process.env.SUPABASE_URL || '').trim();
-const supabaseServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || '').trim();
 
 function mask(s: string | undefined, leave = 6) {
   if (!s) return '<missing>';
@@ -24,129 +25,79 @@ function mask(s: string | undefined, leave = 6) {
   return `${s.slice(0, leave)}...${s.slice(-leave)}`;
 }
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error(
-    `Missing Supabase environment variables. SUPABASE_URL=${mask(supabaseUrl)} SUPABASE_KEY=${mask(supabaseServiceKey)}`
-  );
-}
+console.log('=== SUPABASE CONNECTION DEBUG ===');
+console.log('SUPABASE_URL:', mask(supabaseUrl));
+console.log('SUPABASE_KEY:', mask(supabaseServiceKey));
+console.log('Loaded .env from:', path.resolve(__dirname, '../../.env'));
+console.log('DEBUG: process.env.SUPABASE_SERVICE_ROLE_KEY present:', !!process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-console.log(`[supabaseClient] Initializing with URL: ${mask(supabaseUrl)} and key: ${mask(supabaseServiceKey)}`);
-
-// Custom fetch with better error handling and timeout
-const customFetch = async (url: string, options: any = {}) => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    return response;
-  } catch (error: any) {
-    clearTimeout(timeoutId);
-    
-    if (error.name === 'AbortError') {
-      throw new Error('Request timeout: Unable to reach Supabase servers');
+// Configure fetch with node-fetch implementation
+const clientConfig: any = {
+    auth: { 
+        autoRefreshToken: false, 
+        persistSession: false 
+    },
+    global: { 
+        fetch: fetch as any,
+        headers: { 'Content-Type': 'application/json' }
     }
-    
-    if (error.code === 'ENOTFOUND') {
-      throw new Error(`DNS resolution failed for ${new URL(url).hostname}. Check your internet connection and DNS settings.`);
-    }
-    
-    throw error;
-  }
 };
 
-export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
-  global: {
-    fetch: customFetch as any,
-  },
-});
+// Create Supabase client
+export const supabase: SupabaseClient = createClient(
+    supabaseUrl,
+    supabaseServiceKey,
+    clientConfig
+);
 
-// Global flag to track if connection is working
-let isConnectionHealthy = false;
+// Test connection
+(async function testDatabaseConnection() {
+  console.log('\n=== TESTING DATABASE CONNECTION ===');
 
-/* Network connectivity check with detailed diagnostics */
-(async function networkConnectivityCheck() {
   try {
-    console.log('[supabaseClient] Starting network connectivity test...');
-    
-    // First, test basic DNS resolution
-    const hostname = new URL(supabaseUrl).hostname;
-    console.log(`[supabaseClient] Testing DNS resolution for: ${hostname}`);
-    
-    const start = Date.now();
-    
-    // Try a simple connection test first
-    const testUrl = `${supabaseUrl}/rest/v1/`;
-    const testResponse = await customFetch(testUrl, {
-      method: 'GET',
-      headers: {
-        'apikey': supabaseServiceKey,
-        'Authorization': `Bearer ${supabaseServiceKey}`,
-      },
-    });
-    
-    const elapsed = Date.now() - start;
-    
-    if (testResponse.ok) {
-      console.log(`[supabaseClient] ✅ Network connection successful! elapsed=${elapsed}ms`);
-      isConnectionHealthy = true;
-      
-      // Now test database access
-      try {
-        const dbTest = await supabase
-          .from('otp_tokens')
-          .select('id')
-          .limit(1)
-          .maybeSingle();
-        
-        if (dbTest.error) {
-          if (dbTest.error.code === 'PGRST116') {
-            console.log('[supabaseClient] ⚠️  Table "otp_tokens" not found. Please create it in your Supabase dashboard.');
-          } else {
-            console.error('[supabaseClient] Database access error:', dbTest.error.message);
-          }
-        } else {
-          console.log('[supabaseClient] ✅ Database access working correctly!');
+    // Test 1: Select
+    const { data: testData, error: testError } = await supabase
+      .from('users')
+      .select('id')
+      .limit(1);
+    if (testError) {
+      console.error('❌ Basic connection test failed:', JSON.stringify(testError, null, 2));
+    } else {
+      console.log('✅ Basic connection successful; sample rows:', testData);
+    }
+
+    // Test 2: Insert only if service role present
+    if (supabaseServiceKey) {
+      console.log('Test 2: Insert capability test...');
+      const newId = crypto.randomUUID();
+      const { data: insertData, error: insertError } = await supabase
+        .from('users')
+        .insert({
+          id: newId, // safe: valid uuid
+          first_name: 'Test',
+          last_name: 'User',
+          role: 'patient',
+          consent_given: true,
+          created_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error('❌ Insert test failed:', JSON.stringify(insertError, null, 2));
+      } else {
+        console.log('✅ Insert test successful, new id:', insertData?.id);
+        if (insertData?.id) {
+          await supabase.from('users').delete().eq('id', insertData.id);
+          console.log('🧹 Test row cleaned up');
         }
-      } catch (dbErr: any) {
-        console.error('[supabaseClient] Database test failed:', dbErr.message);
       }
     } else {
-      console.error(`[supabaseClient] ❌ HTTP error ${testResponse.status}: ${testResponse.statusText}`);
+      console.warn('⚠️ Skipping insert test: no service role key');
     }
-    
-  } catch (e: any) {
-    console.error('[supabaseClient] ❌ Network connectivity test failed:');
-    console.error('  Error:', e?.message || e);
-    console.error('  URL:', mask(supabaseUrl));
-    
-    // Provide specific troubleshooting based on error type
-    if (e?.message?.includes('DNS resolution failed')) {
-      console.error('\n🔧 DNS TROUBLESHOOTING:');
-      console.error('  1. Check your internet connection');
-      console.error('  2. Try changing DNS servers to 8.8.8.8 and 8.8.4.4');
-      console.error('  3. Run: ipconfig /flushdns (Windows) or sudo dscacheutil -flushcache (Mac)');
-      console.error('  4. Disable VPN temporarily if using one');
-      console.error('  5. Check if firewall/antivirus is blocking the connection');
-    } else if (e?.message?.includes('timeout')) {
-      console.error('\n🔧 TIMEOUT TROUBLESHOOTING:');
-      console.error('  1. Check your internet speed');
-      console.error('  2. Try connecting from a different network');
-      console.error('  3. Check if your ISP is blocking Supabase');
-    }
-    
-    console.warn('\n[supabaseClient] ⚠️  Server will continue but database operations will fail.');
-    console.warn('[supabaseClient] Please fix network connectivity for OTP functionality to work.');
+  } catch (err: any) {
+    console.error('❌ Database connection test exception:', err?.message || err);
   }
 })();
-
-// Export a function to check connection health
-export const isSupabaseHealthy = () => isConnectionHealthy;
+export const supabaseService = createClient(supabaseUrl, supabaseServiceKey, clientConfig); // service role
+export const supabaseAnon = createClient(supabaseUrl, process.env.SUPABASE_ANON_KEY || '', clientConfig); // anon

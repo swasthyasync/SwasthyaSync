@@ -1,10 +1,17 @@
-// apps/web/src/pages/patient/Dashboard.tsx
+// apps/web/src/pages/patient/Dashboard.tsx - UPDATED to use backend API
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { supabase, authService, User as SupabaseUser } from '../../utils/supabase';
+import { profileService } from '../../services/profileService';
 import ProfileManager from '../../components/ProfileManager';
 import AppointmentBooking from '../../components/AppointmentBooking';
+import ChatWidget from '../../components/ChatWidget';
+import PrakritiSummaryCard from '../../components/PrakritiSummaryCard';
+import api from '../../utils/api';
+import PrakritiVisualizationEnhanced from '../../components/PrakritiVisualizationEnhanced';
 
-/* ---------- types (unchanged) ---------- */
+/* ---------- types ---------- */
 interface PrakritiScores {
   vata: number;
   pitta: number;
@@ -24,11 +31,12 @@ interface PrakritiScores {
 
 interface User {
   id: string;
-  name: string;
-  firstName?: string;
-  lastName?: string;
+  name?: string;
+  first_name?: string;
+  last_name?: string;
   phone?: string;
   email?: string;
+  role?: string;
 }
 
 interface MentalHealthScore {
@@ -53,12 +61,23 @@ interface HealthMetric {
   icon: string;
 }
 
+interface AppUser {
+  id: string;
+  name?: string;
+  first_name?: string;
+  last_name?: string;
+  phone?: string;
+  email?: string;
+  role?: string;
+}
+
 /* ---------- component ---------- */
 const PatientDashboard: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [user, setUser] = useState<User | null>(null);
   const [prakritiScores, setPrakritiScores] = useState<PrakritiScores | null>(null);
   const [mentalHealth, setMentalHealth] = useState<MentalHealthScore | null>(null);
-  const [therapyRecommendations, setTherapyRecommendations] = useState<any | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [healthMetrics, setHealthMetrics] = useState<HealthMetric[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,18 +85,154 @@ const PatientDashboard: React.FC = () => {
   const [activeView, setActiveView] = useState('dashboard');
 
   // UI states
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark'); // new theme toggle
-  const [selectedCard, setSelectedCard] = useState<string | null>(null); // interactive card selection
-
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [selectedCard, setSelectedCard] = useState<string | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   // Modal states
   const [showProfileManager, setShowProfileManager] = useState(false);
   const [showAppointmentBooking, setShowAppointmentBooking] = useState(false);
 
-  // NEW: focus visualization when clicking the Dashboard card
+  // Focus visualization
   const [focusVisualization, setFocusVisualization] = useState(false);
   const chartRef = useRef<HTMLDivElement | null>(null);
+  
+  console.log('[Debug] Rendering Dashboard, prakritiScores:', prakritiScores);
 
-  /* ---------- theme CSS injection (unchanged behavior but kept here) ---------- */
+  // Helper function to parse JSONB fields
+  const parseJsonbFields = (data: any): any => {
+    if (!data) return data;
+    
+    const parsedData = { ...data };
+    
+    // Parse array fields that might be stored as JSON strings
+    const arrayFields = [
+      'chronic_conditions',
+      'allergies',
+      'family_history',
+      'specific_concerns',
+      'treatment_goals',
+      'dietary_preferences'
+    ];
+    
+    const objectFields = [
+      'current_medications',
+      'previous_surgeries'
+    ];
+    
+    // Parse array fields
+    for (const field of arrayFields) {
+      if (typeof (data as any)[field] === 'string') {
+        try {
+          (parsedData as any)[field] = JSON.parse((data as any)[field]);
+        } catch (e) {
+          console.warn(`[Dashboard] Failed to parse ${field} as JSON:`, (data as any)[field]);
+          // Keep as string if parsing fails, but convert to array if it's a comma-separated string
+          if (typeof (data as any)[field] === 'string' && (data as any)[field].includes(',')) {
+            (parsedData as any)[field] = (data as any)[field].split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+          } else if (typeof (data as any)[field] === 'string' && (data as any)[field].length > 0) {
+            (parsedData as any)[field] = [(data as any)[field]];
+          } else {
+            (parsedData as any)[field] = [];
+          }
+        }
+      } else if (Array.isArray((data as any)[field])) {
+        // Already an array, keep as is
+        (parsedData as any)[field] = (data as any)[field];
+      } else {
+        // Not a string or array, convert to empty array
+        (parsedData as any)[field] = [];
+      }
+    }
+    
+    // Parse object fields
+    for (const field of objectFields) {
+      if (typeof (data as any)[field] === 'string') {
+        try {
+          (parsedData as any)[field] = JSON.parse((data as any)[field]);
+        } catch (e) {
+          console.warn(`[Dashboard] Failed to parse ${field} as JSON:`, (data as any)[field]);
+          // Keep as original value if parsing fails
+          (parsedData as any)[field] = (data as any)[field];
+        }
+      }
+    }
+    
+    return parsedData;
+  };
+
+  // Fetch prakriti scores and user data
+  useEffect(() => {
+    const fetchPrakritiData = async () => {
+      try {
+        setLoading(true);
+        const response = await api.get('/questionnaire/latest');
+        console.log('[Debug] Fetched prakriti data:', response);
+        if (response) {
+          const { scores, mentalHealth: mental, dominant } = response;
+          
+          // Only set scores if they're available and have the required structure
+          if (scores && scores.vata != null && scores.pitta != null && scores.kapha != null) {
+            // Parse scores if they're a string
+            let parsedScores = scores;
+            if (typeof scores === 'string') {
+              try {
+                parsedScores = JSON.parse(scores);
+              } catch (e) {
+                console.warn('Failed to parse scores string:', e);
+                parsedScores = scores;
+              }
+            }
+            
+            const normalizedScores = {
+              vata: parsedScores.vata,
+              pitta: parsedScores.pitta,
+              kapha: parsedScores.kapha,
+              dominant: dominant || 'vata',
+              percent: {
+                vata: Math.round((parsedScores.vata || 0) * 100),
+                pitta: Math.round((parsedScores.pitta || 0) * 100),
+                kapha: Math.round((parsedScores.kapha || 0) * 100)
+              },
+              ml_prediction: parsedScores.ml_prediction
+            };
+            setPrakritiScores(normalizedScores);
+          } else {
+            console.warn('Invalid scores structure:', scores);
+            setPrakritiScores(null);
+          }
+
+          if (mental) {
+            // Parse mental health if it's a string
+            let parsedMental = mental;
+            if (typeof mental === 'string') {
+              try {
+                parsedMental = JSON.parse(mental);
+              } catch (e) {
+                console.warn('Failed to parse mental health string:', e);
+                parsedMental = mental;
+              }
+            }
+            
+            setMentalHealth({
+              score: typeof parsedMental === 'object' ? parsedMental.score : parsedMental,
+              level: typeof parsedMental === 'object' ? parsedMental.level : (parsedMental > 75 ? 'green' : parsedMental > 50 ? 'yellow' : 'red')
+            });
+          }
+        } else {
+          console.warn('No questionnaire data found');
+        }
+      } catch (err) {
+        console.error('Failed to fetch prakriti data:', err);
+        setError('Failed to load health data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPrakritiData();
+  }, []);
+
+  /* ---------- theme CSS injection ---------- */
   useEffect(() => {
     const css = `
       :root{
@@ -206,178 +361,333 @@ const PatientDashboard: React.FC = () => {
     localStorage.setItem('uiTheme', theme);
   }, [theme]);
 
-  useEffect(() => {
-    loadUserAndData();
-    loadMockAppointments();
-    loadHealthMetrics();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
-  /* ---------- data loading logic (unchanged) ---------- */
-  const loadUserAndData = async () => {
+  // Add this useEffect for debugging
+useEffect(() => {
+  console.log('[Debug] prakritiScores updated:', prakritiScores);
+  if (prakritiScores) {
+    console.log('[Debug] ML Prediction:', prakritiScores.ml_prediction);
+    console.log('[Debug] Percentages:', prakritiScores.percent);
+  }
+}, [prakritiScores]);
+
+  /* ---------- Load data from Supabase ONLY ---------- */
+ /* ---------- Auth startup + subscribe to Supabase auth changes ---------- */
+// Replace the useEffect and loadDashboardData in Dashboard.tsx
+
+useEffect(() => {
+  let mounted = true;
+
+  const init = async () => {
     try {
-      setLoading(true);
-      setError('');
+      console.log('[Dashboard:init] Starting authentication check...');
 
-      // Get user from localStorage
-      const token = localStorage.getItem('authToken');
-      const userData = localStorage.getItem('user');
-
-      if (!token) {
-        setError('No authentication token found. Please log in again.');
-        setTimeout(() => {
-          window.location.href = '/auth/phone';
-        }, 2000);
+      // Method 1: Try Supabase session first
+      const { data: { session }, error } = await supabase.auth.getSession();
+      
+      if (session?.user?.id && !error) {
+        console.log('[Dashboard:init] Valid Supabase session found:', session.user.id);
+        if (mounted) {
+          await loadDashboardData(session.user.id);
+        }
         return;
       }
 
-      let parsedUser = null;
-      try {
-        parsedUser = userData ? JSON.parse(userData) : null;
-      } catch (e) {
-        setError('Invalid user data. Please log in again.');
+      // Method 2: Check localStorage for user data (fallback)
+      const storedUserJson = localStorage.getItem('user');
+      if (storedUserJson) {
+        try {
+          const parsed = JSON.parse(storedUserJson);
+          if (parsed?.id) {
+            console.log('[Dashboard:init] Found user in localStorage:', parsed.id);
+            if (mounted) {
+              await loadDashboardData(parsed.id);
+            }
+            return;
+          }
+        } catch (e) {
+          console.warn('[Dashboard:init] Failed to parse localStorage user:', e);
+        }
+      }
+
+      // Method 3: Check location state (from questionnaire completion)
+      if (location.state?.prakritiScores) {
+        // Direct prakritiScores from questionnaire
+        setPrakritiScores(location.state.prakritiScores);
+        console.log('[Dashboard] Loaded prakritiScores from location state:', location.state.prakritiScores);
+      } else if (location.state?.fromQuestionnaire && location.state?.prakritiResults) {
+        // Legacy format support
+        const results = location.state.prakritiResults;
+        setPrakritiScores({
+          vata: results.scores.vata,
+          pitta: results.scores.pitta,
+          kapha: results.scores.kapha,
+          dominant: results.dominant,
+          percent: results.percent
+        });
+        if (results.mentalHealth) {
+          setMentalHealth({
+            level: results.mentalHealth.level,
+            score: results.mentalHealth.score
+          });
+        }
+        setLoading(false);
         return;
       }
 
-      if (!parsedUser || !parsedUser.id) {
-        setError('No user ID found. Please log in again.');
-        setTimeout(() => {
-          window.location.href = '/auth/phone';
-        }, 2000);
-        return;
-      }
-
-      // Ensure user has proper name format
-      if (!parsedUser.name && parsedUser.firstName) {
-        parsedUser.name = `${parsedUser.firstName} ${parsedUser.lastName || ''}`.trim();
-      }
-
-      setUser(parsedUser);
-
-      // Try to load data from multiple sources
-      await loadQuestionnaireData(parsedUser.id, token);
-      await loadLocalStorageResults();
+      // No valid authentication found
+      console.warn('[Dashboard:init] No authentication found - redirecting to login');
+      navigate('/auth/phone');
 
     } catch (err) {
-      console.error('Error loading dashboard:', err);
-      setError(`Failed to load dashboard: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setLoading(false);
+      console.error('[Dashboard:init] Initialization failed:', err);
+      if (mounted) {
+        navigate('/auth/phone');
+      }
     }
   };
 
-  const loadQuestionnaireData = async (userId: string, token: string) => {
+  // Listen for auth state changes (only for Supabase sessions)
+  const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+    console.log('[Dashboard] Auth state changed:', event);
+    
+    if (event === 'SIGNED_IN' && session?.user?.id && mounted) {
+      await loadDashboardData(session.user.id);
+    } else if (event === 'SIGNED_OUT') {
+      setUser(null);
+      setPrakritiScores(null);
+      // Clear localStorage as well
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+      navigate('/auth/phone');
+    }
+  });
+
+  init();
+
+  return () => {
+    mounted = false;
+    authListener?.subscription?.unsubscribe();
+  };
+}, [location.state, navigate]);
+
+// Replace the loadDashboardData function in your Dashboard.tsx (around line 300-450)
+
+const loadDashboardData = async (userId: string) => {
+  try {
+    setLoading(true);
+    setError('');
+    console.log('[Dashboard] Loading data for authenticated user:', userId);
+
+    // Step 1: Get user profile using the profileService for consistent data handling
+    let userData = null;
+    let useLocalStorageFallback = false;
+
     try {
-      const response = await fetch(`http://localhost:4000/questionnaire/${userId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+      // Use the profileService to get user data with proper JSONB parsing
+      const completeProfile = await profileService.getCompleteProfile(userId);
+      console.log('[Dashboard] Complete profile from profileService:', completeProfile);
+
+      if (completeProfile?.profile) {
+        userData = completeProfile.profile;
+        console.log('[Dashboard] User found in database:', userData.first_name, userData.last_name);
+      } else {
+        console.warn('[Dashboard] No user found in database, trying localStorage fallback');
+        useLocalStorageFallback = true;
+      }
+    } catch (dbError) {
+      console.warn('[Dashboard] Database connection error, using localStorage fallback:', dbError);
+      useLocalStorageFallback = true;
+    }
+
+    // Handle user data (from database or localStorage)
+    let formattedUser: AppUser;
+
+    if (userData && !useLocalStorageFallback) {
+      // User data already parsed by profileService
+      console.log('[Dashboard] Using profileService parsed user data:', userData);
+
+      // Use database data
+      formattedUser = {
+        id: userData.id,
+        name: `${userData.first_name || ''} ${userData.last_name || ''}`.trim() || '',
+        first_name: userData.first_name,
+        last_name: userData.last_name,
+        phone: userData.phone,
+        email: userData.email,
+        role: userData.role
+      };
+    } else {
+      // Fallback to localStorage
+      const storedUserJson = localStorage.getItem('user');
+      if (storedUserJson) {
+        try {
+          const parsed = JSON.parse(storedUserJson);
+          formattedUser = {
+            id: parsed.id,
+            name: `${parsed.first_name || ''} ${parsed.last_name || ''}`.trim() || parsed.name || '',
+            first_name: parsed.first_name,
+            last_name: parsed.last_name,
+            phone: parsed.phone,
+            email: parsed.email,
+            role: parsed.role || 'patient'
+          };
+          console.log('[Dashboard] Using localStorage user data:', formattedUser.name);
+        } catch (parseError) {
+          throw new Error('Failed to parse localStorage user data');
         }
-      });
+      } else {
+        throw new Error('No user data available in database or localStorage');
+      }
+    }
 
-      if (response.ok) {
-        const data = await response.json();
-        const questionnaire = data.questionnaire;
+    console.log('[Dashboard] Formatted user data:', formattedUser);
+    setUser(formattedUser);
 
-        if (questionnaire && questionnaire.scores) {
-          const scores: PrakritiScores = {
-            vata: questionnaire.scores.vata || 0,
-            pitta: questionnaire.scores.pitta || 0,
-            kapha: questionnaire.scores.kapha || 0,
-            dominant: questionnaire.dominant || questionnaire.scores.dominant || 'kapha',
-            percent: {
-              vata: questionnaire.scores.percent?.vata || 0,
-              pitta: questionnaire.scores.percent?.pitta || 0,
-              kapha: questionnaire.scores.percent?.kapha || 0,
+    // Step 2: Get questionnaire data from Supabase (with error handling)
+    try {
+      const { data: questionnaireData, error: questionnaireError } = await supabase
+        .from('questionnaire_answers')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (questionnaireError) {
+        console.warn('[Dashboard] Questionnaire query error (non-fatal):', questionnaireError);
+      }
+
+      if (questionnaireData && questionnaireData.length > 0) {
+        const latest = questionnaireData[0];
+        console.log('[Dashboard] Questionnaire data found for user');
+        
+        // Parse scores with proper type safety
+        let scoresData: any = {};
+        try {
+          scoresData = typeof latest.scores === 'string' 
+            ? JSON.parse(latest.scores) 
+            : (latest.scores || {});
+          
+          if (!scoresData || typeof scoresData !== 'object') {
+            scoresData = {};
+          }
+        } catch (e) {
+          console.warn('[Dashboard] Error parsing scores:', e);
+          scoresData = {};
+        }
+        
+        // Parse mental health
+        let mentalHealthData = null;
+        try {
+          mentalHealthData = typeof latest.mental_health_score === 'string'
+            ? JSON.parse(latest.mental_health_score)
+            : latest.mental_health_score;
+        } catch (e) {
+          console.warn('[Dashboard] Error parsing mental health score:', e);
+        }
+
+        // Create scores object with safe property access
+        const rawVata = scoresData && typeof scoresData === 'object' ? scoresData.vata : undefined;
+        const rawPitta = scoresData && typeof scoresData === 'object' ? scoresData.pitta : undefined;
+        const rawKapha = scoresData && typeof scoresData === 'object' ? scoresData.kapha : undefined;
+        const rawDominant = scoresData && typeof scoresData === 'object' ? scoresData.dominant : undefined;
+        const rawPercent = scoresData && typeof scoresData === 'object' ? scoresData.percent : undefined;
+
+        const scores: PrakritiScores = {
+          vata: Number(rawVata || 0),
+          pitta: Number(rawPitta || 0),
+          kapha: Number(rawKapha || 0),
+          dominant: rawDominant || latest.final_prakriti_assessment || latest.dominant || 'vata',
+          percent: rawPercent || calculateDefaultPercents(scoresData)
+        };
+
+        // Add ML prediction if available
+        if (latest.ml_predictions) {
+          try {
+            const mlPrediction = typeof latest.ml_predictions === 'string'
+              ? JSON.parse(latest.ml_predictions)
+              : latest.ml_predictions;
+            
+            if (mlPrediction && typeof mlPrediction === 'object') {
+              scores.ml_prediction = {
+                predicted: mlPrediction.predicted || scores.dominant,
+                confidence: Number(mlPrediction.confidence || latest.confidence_score || 0),
+                probabilities: mlPrediction.probabilities || {}
+              };
             }
-          };
-
-          if (questionnaire.ml_predictions || questionnaire.scores.ml_prediction) {
-            const mlData = questionnaire.ml_predictions || questionnaire.scores.ml_prediction;
-            scores.ml_prediction = {
-              predicted: mlData.predicted || mlData.prakriti?.predicted || scores.dominant,
-              confidence: mlData.confidence || mlData.prakriti?.confidence || 0,
-              probabilities: mlData.probabilities || mlData.prakriti?.probabilities || {
-                vata: 0.33, pitta: 0.33, kapha: 0.34
-              }
-            };
-          }
-
-          setPrakritiScores(scores);
-
-          if (questionnaire.mental_health_score) {
-            setMentalHealth({
-              level: questionnaire.mental_health_score.level || 'green',
-              score: questionnaire.mental_health_score.score || 50
-            });
+          } catch (e) {
+            console.warn('[Dashboard] Error parsing ML predictions:', e);
           }
         }
-      } else if (response.status !== 404) {
-        console.error('Failed to load questionnaire:', response.status);
-      }
-    } catch (error) {
-      console.error('Error fetching questionnaire:', error);
-    }
-  };
 
-  const loadLocalStorageResults = async () => {
-    const storedResults = localStorage.getItem('prakritiResults');
-    if (storedResults && !prakritiScores) {
-      try {
-        const parsed = JSON.parse(storedResults);
-        const rawScores = parsed.scores || parsed.questionnaire?.scores || parsed;
+        setPrakritiScores(scores);
+        console.log('[Dashboard] Prakriti scores set:', scores);
+        console.log('[Debug] Prakriti Scores:', scores);
 
-        if (rawScores) {
-          const v = Number(rawScores.vata || 0);
-          const p = Number(rawScores.pitta || 0);
-          const k = Number(rawScores.kapha || 0);
-          const total = v + p + k || 1;
-
-          const percent = rawScores.percent || {
-            vata: Math.round((v / total) * 100),
-            pitta: Math.round((p / total) * 100),
-            kapha: Math.round((k / total) * 100),
-          };
-
-          const mlData = rawScores.ml_prediction || rawScores.ml_predictions || parsed.ml_predictions;
-
-          const scores: PrakritiScores = {
-            vata: v,
-            pitta: p,
-            kapha: k,
-            dominant: rawScores.dominant || mlData?.predicted || 'kapha',
-            percent,
-          };
-
-          if (mlData) {
-            scores.ml_prediction = {
-              predicted: mlData.predicted || mlData.prakriti?.predicted || scores.dominant,
-              confidence: Number(mlData.confidence || mlData.prakriti?.confidence || 0),
-              probabilities: mlData.probabilities || mlData.prakriti?.probabilities || {
-                vata: 0.33, pitta: 0.33, kapha: 0.34
-              }
-            };
-          }
-
-          setPrakritiScores(scores);
-
-          const therapies = parsed.dietPlan || parsed.dietRecommendations || parsed.therapyRecommendations;
-          if (therapies) {
-            setTherapyRecommendations(therapies);
-          }
+        // Set mental health
+        if (mentalHealthData && typeof mentalHealthData === 'object') {
+          setMentalHealth({
+            level: mentalHealthData.level || 'green',
+            score: Number(mentalHealthData.score || 50)
+          });
         }
-      } catch (e) {
-        console.error('Error parsing stored results:', e);
+      } else {
+        console.log('[Dashboard] No questionnaire data found for user - new user');
+        setPrakritiScores(null);
+        setMentalHealth(null);
       }
+    } catch (questionnaireError) {
+      console.warn('[Dashboard] Error loading questionnaire (non-fatal):', questionnaireError);
+      // Continue without questionnaire data
+      setPrakritiScores(null);
+      setMentalHealth(null);
     }
-  };
 
+    // Load mock data
+    loadMockAppointments();
+    loadHealthMetrics();
+
+  } catch (err: any) {
+    console.error('[Dashboard] Error loading dashboard data:', err);
+    setError(err?.message || 'Failed to load dashboard data');
+  } finally {
+    setLoading(false);
+  }
+};
+
+// Helper function to calculate percentages with proper type safety
+const calculateDefaultPercents = (scoresData: any): { vata: number; pitta: number; kapha: number } => {
+  // Ensure scoresData is an object and has the expected properties
+  if (!scoresData || typeof scoresData !== 'object') {
+    return { vata: 33, pitta: 33, kapha: 34 };
+  }
+
+  // Safe property access with fallbacks
+  const vataValue = scoresData.hasOwnProperty('vata') ? scoresData.vata : 0;
+  const pittaValue = scoresData.hasOwnProperty('pitta') ? scoresData.pitta : 0;
+  const kaphaValue = scoresData.hasOwnProperty('kapha') ? scoresData.kapha : 0;
+
+  const vata = Number(vataValue) || 0;
+  const pitta = Number(pittaValue) || 0;
+  const kapha = Number(kaphaValue) || 0;
+  const total = vata + pitta + kapha;
+  
+  if (total === 0) {
+    return { vata: 33, pitta: 33, kapha: 34 };
+  }
+  
+  return {
+    vata: Math.round((vata / total) * 100),
+    pitta: Math.round((pitta / total) * 100),
+    kapha: Math.round((kapha / total) * 100)
+  };
+};
   const loadMockAppointments = () => {
     const mockAppointments: Appointment[] = [
       {
         id: '1',
         doctorName: 'Dr. Priya Sharma',
-        date: '2025-09-18',
+        date: '2025-09-28',
         time: '10:00 AM',
         type: 'Prakriti Analysis',
         status: 'upcoming'
@@ -385,7 +695,7 @@ const PatientDashboard: React.FC = () => {
       {
         id: '2',
         doctorName: 'Dr. Raj Kumar',
-        date: '2025-09-10',
+        date: '2025-09-20',
         time: '2:30 PM',
         type: 'Follow-up Consultation',
         status: 'completed'
@@ -429,14 +739,21 @@ const PatientDashboard: React.FC = () => {
   };
 
   const handleTakeQuestionnaire = () => {
-    window.location.href = '/auth/prakriti-questionnaire';
-  };
+  navigate('/auth/prakriti-questionnaire', {
+    state: { userId: user?.id }
+  });
+};
 
-  const handleLogout = () => {
-    localStorage.clear();
-    sessionStorage.clear();
-    window.location.href = '/auth/phone';
-  };
+ const handleLogout = async () => {
+  try {
+    await supabase.auth.signOut();
+    setUser(null);
+    setPrakritiScores(null);
+    navigate('/auth/phone');
+  } catch (error) {
+    console.error('[Dashboard] Logout error:', error);
+  }
+};
 
   const getColorClass = (type: string) => {
     switch (type) {
@@ -667,7 +984,7 @@ const PatientDashboard: React.FC = () => {
     }
   }, [activeView, focusVisualization]);
 
-  /* ---------- loading / error / no-user states (kept similar to your file) ---------- */
+  /* ---------- loading / error / no-user states ---------- */
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center ayurveda-page" data-theme={theme}>
@@ -696,7 +1013,7 @@ const PatientDashboard: React.FC = () => {
             Try Again
           </button>
           <button
-            onClick={() => window.location.href = '/auth/phone'}
+            onClick={() => navigate('/auth/phone')}
             className="px-4 py-2 rounded-lg transition-colors"
             style={{ background: 'rgba(255,248,220,0.85)', border: '1px solid var(--card-border)', color: '#6b4423' }}
           >
@@ -713,7 +1030,7 @@ const PatientDashboard: React.FC = () => {
         <div className="text-center ayurveda-card p-8">
           <p className={theme === 'dark' ? 'text-amber-100' : 'text-gray-700'}>No user data found. Redirecting to login...</p>
           <button
-            onClick={() => window.location.href = '/auth/phone'}
+            onClick={() => navigate('/auth/phone')}
             className="mt-4 px-4 py-2 rounded-lg transition-colors"
             style={{ background: 'linear-gradient(135deg, var(--accent-gold-1), var(--accent-gold-2))', color: '#2c1810' }}
           >
@@ -724,10 +1041,9 @@ const PatientDashboard: React.FC = () => {
     );
   }
 
-  /* ---------- small helper used previously, left unchanged ---------- */
+  /* ---------- small helper used previously ---------- */
   const renderPrakritiChart = () => {
     if (!prakritiScores) return null;
-    // Use enhanced visual component and pass focus flag
     return <EnhancedPrakritiVisualization scores={prakritiScores} focus={focusVisualization} />;
   };
 
@@ -771,7 +1087,7 @@ const PatientDashboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* Primary nav - hidden on smaller screens */}
+              {/* Desktop Navigation */}
               <div className="hidden md:flex items-center ml-8 space-x-6">
                 <button
                   onClick={() => setActiveView('dashboard')}
@@ -793,6 +1109,18 @@ const PatientDashboard: React.FC = () => {
                 >
                   Health Profile
                 </button>
+                {prakritiScores && (
+                  <button
+                    onClick={() => setActiveView('visualization')}
+                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      activeView === 'visualization'
+                        ? 'bg-amber-100/10 text-amber-200'
+                        : 'text-white/80 hover:text-white'
+                    }`}
+                  >
+                    Visualization
+                  </button>
+                )}
                 <button
                   onClick={() => setActiveView('appointments')}
                   className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
@@ -806,8 +1134,24 @@ const PatientDashboard: React.FC = () => {
               </div>
             </div>
 
+            {/* Mobile menu button */}
+            <div className="md:hidden flex items-center">
+              <button
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                className="p-2 rounded-md text-white hover:bg-white/10"
+              >
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {mobileMenuOpen ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  )}
+                </svg>
+              </button>
+            </div>
+
             {/* Header Right: search, theme toggle, profile */}
-            <div className="flex items-center space-x-3">
+            <div className="hidden md:flex items-center space-x-3">
               <input
                 placeholder="Search records, tips, doctors..."
                 className="search-input hidden sm:block"
@@ -844,10 +1188,10 @@ const PatientDashboard: React.FC = () => {
                   color: '#2c1810',
                   fontWeight: 700
                 }}>
-                  {user?.name?.[0] || user?.firstName?.[0] || 'U'}
+                  {user?.name?.[0] || user?.first_name?.[0] || 'U'}
                 </div>
                 <span className="hidden md:block" style={{ color: theme === 'dark' ? 'white' : 'var(--muted-brown)' }}>
-                  {user.name || `${user.firstName} ${user.lastName}`}
+                  {user.name || `${user.first_name} ${user.last_name}`}
                 </span>
               </button>
 
@@ -860,6 +1204,77 @@ const PatientDashboard: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {/* Mobile menu */}
+          {mobileMenuOpen && (
+            <motion.div 
+              className="md:hidden py-4 px-4 border-t border-white/10"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+            >
+              <div className="flex flex-col space-y-3">
+                <button
+                  onClick={() => { setActiveView('dashboard'); setMobileMenuOpen(false); }}
+                  className={`px-3 py-2 rounded-md text-sm font-medium text-left ${
+                    activeView === 'dashboard'
+                      ? 'bg-amber-100/10 text-amber-200'
+                      : 'text-white/80 hover:text-white'
+                  }`}
+                >
+                  Dashboard
+                </button>
+                <button
+                  onClick={() => { setActiveView('health'); setMobileMenuOpen(false); }}
+                  className={`px-3 py-2 rounded-md text-sm font-medium text-left ${
+                    activeView === 'health'
+                      ? 'bg-amber-100/10 text-amber-200'
+                      : 'text-white/80 hover:text-white'
+                  }`}
+                >
+                  Health Profile
+                </button>
+                {prakritiScores && (
+                  <button
+                    onClick={() => { setActiveView('visualization'); setMobileMenuOpen(false); }}
+                    className={`px-3 py-2 rounded-md text-sm font-medium text-left ${
+                      activeView === 'visualization'
+                        ? 'bg-amber-100/10 text-amber-200'
+                        : 'text-white/80 hover:text-white'
+                    }`}
+                  >
+                    Visualization
+                  </button>
+                )}
+                <button
+                  onClick={() => { setActiveView('appointments'); setMobileMenuOpen(false); }}
+                  className={`px-3 py-2 rounded-md text-sm font-medium text-left ${
+                    activeView === 'appointments'
+                      ? 'bg-amber-100/10 text-amber-200'
+                      : 'text-white/80 hover:text-white'
+                  }`}
+                >
+                  Appointments
+                </button>
+                
+                {/* Mobile profile actions */}
+                <div className="pt-4 mt-4 border-t border-white/10">
+                  <button
+                    onClick={() => { setShowProfileManager(true); setMobileMenuOpen(false); }}
+                    className="w-full text-left px-3 py-2 rounded-md text-sm font-medium text-white/80 hover:text-white"
+                  >
+                    Profile
+                  </button>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full text-left px-3 py-2 rounded-md text-sm font-medium text-white/80 hover:text-white"
+                  >
+                    Logout
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
         </div>
       </header>
 
@@ -871,7 +1286,7 @@ const PatientDashboard: React.FC = () => {
             {/* Welcome Section */}
             <div className="mb-8">
               <h2 className="text-3xl font-bold mb-2" style={{ color: theme === 'dark' ? 'var(--accent-gold-3)' : 'var(--muted-brown)' }}>
-                Welcome back, {user.name || user.firstName}!
+                Welcome back, {user.name || user.first_name}!
               </h2>
               <p className={theme === 'dark' ? 'text-amber-200' : 'text-gray-700'}>
                 Here's your personalized health dashboard based on your Prakriti assessment.
@@ -933,8 +1348,8 @@ const PatientDashboard: React.FC = () => {
               <div
                 tabIndex={0}
                 role="button"
-                onClick={() => { setActiveView('health'); setFocusVisualization(true); }}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setActiveView('health'); setFocusVisualization(true); } }}
+                onClick={() => { setActiveView('visualization'); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setActiveView('visualization'); } }}
                 className={`bg-white rounded-xl p-6 border-t-4 border-teal-500 ayurveda-card ${selectedCard === 'visualize' ? 'selected golden-pulse' : ''}`}
               >
                 <div className="flex items-center justify-between mb-2">
@@ -954,6 +1369,7 @@ const PatientDashboard: React.FC = () => {
                 onClick={() => setSelectedCard(prev => prev === 'profile' ? null : 'profile')}
                 onKeyDown={(e) => onCardKey(e, 'profile')}
                 className={`bg-white rounded-xl p-6 border-t-4 border-orange-500 ayurveda-card ${selectedCard === 'profile' ? 'selected golden-pulse' : ''}`}
+
               >
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-sm font-medium card-title">Profile Complete</h3>
@@ -1085,30 +1501,35 @@ const PatientDashboard: React.FC = () => {
           </>
         )}
 
-        {/* Health Profile View */}
-        {activeView === 'health' && (
-          <>
-            <div className="mb-8">
-              <h2 className="text-3xl font-bold mb-2" style={{ color: theme === 'dark' ? 'var(--accent-gold-3)' : 'var(--muted-brown)' }}>Health Profile</h2>
-              <p className={theme === 'dark' ? 'text-amber-200' : 'text-gray-700'}>Comprehensive view of your health data and Prakriti analysis</p>
+        {/* Health Profile View - ENHANCED */}
+{activeView === 'health' && (
+  <>
+    <div className="mb-8">
+      <h2 className="text-3xl font-bold mb-2" style={{ color: theme === 'dark' ? 'var(--accent-gold-3)' : 'var(--muted-brown)' }}>Health Profile</h2>
+      <p className={theme === 'dark' ? 'text-amber-200' : 'text-gray-700'}>Comprehensive view of your health data and Prakriti analysis</p>
+    </div>
+
+    {prakritiScores ? (
+      <div className="mb-8">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-2xl font-bold" style={{ color: theme === 'dark' ? 'var(--accent-gold-3)' : 'var(--muted-brown)' }}>Your Comprehensive Prakriti Analysis</h3>
+          {prakritiScores.ml_prediction && (
+            <div className="flex items-center bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-2 rounded-full border border-blue-200">
+              <div className="w-3 h-3 bg-blue-500 rounded-full mr-2 animate-pulse"></div>
+              <span className="text-sm font-medium text-blue-800">
+                Powered by AI & Traditional Analysis
+              </span>
             </div>
+          )}
+        </div>
+                {/* USE THE ENHANCED PRAKRITI SUMMARY CARD */}
+                <PrakritiSummaryCard scores={prakritiScores} />
 
-            {prakritiScores ? (
-              <div className="mb-8">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-2xl font-bold" style={{ color: theme === 'dark' ? 'var(--accent-gold-3)' : 'var(--muted-brown)' }}>Your Comprehensive Prakriti Analysis</h3>
-                  {prakritiScores.ml_prediction && (
-                    <div className="flex items-center bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-2 rounded-full border border-blue-200">
-                      <div className="w-3 h-3 bg-blue-500 rounded-full mr-2 animate-pulse"></div>
-                      <span className="text-sm font-medium text-blue-800">
-                        Powered by AI & Traditional Analysis
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="ayurveda-card overflow-hidden">
+                {/* ADDITIONAL ORIGINAL VISUALIZATION FOR COMPARISON */}
+                <div className="mt-8 ayurveda-card overflow-hidden">
                   <div className="p-6">
+                    <h4 className="text-xl font-bold mb-6 text-center text-gray-800">Interactive Dashboard Visualization</h4>
+                    
                     {prakritiScores.ml_prediction && (
                       <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
                         <div className="flex items-center justify-between mb-2">
@@ -1123,9 +1544,11 @@ const PatientDashboard: React.FC = () => {
                           </span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div
+                          <motion.div
                             className="bg-blue-500 h-2 rounded-full transition-all duration-500"
-                            style={{ width: `${prakritiScores.ml_prediction.confidence * 100}%` }}
+                            initial={{ width: 0 }}
+                            animate={{ width: `${prakritiScores.ml_prediction.confidence * 100}%` }}
+                            transition={{ duration: 1, ease: 'easeOut' }}
                           />
                         </div>
                       </div>
@@ -1151,13 +1574,15 @@ const PatientDashboard: React.FC = () => {
                               </span>
                             </div>
                             <div className="w-full bg-gray-200 rounded-full h-4 shadow-inner">
-                              <div
+                              <motion.div
                                 className={`h-4 rounded-full transition-all duration-1000 shadow-sm ${
                                   dosha === 'vata' ? 'bg-gradient-to-r from-blue-400 to-blue-600' :
                                   dosha === 'pitta' ? 'bg-gradient-to-r from-red-400 to-red-600' :
                                   'bg-gradient-to-r from-green-400 to-green-600'
                                 }`}
-                                style={{ width: `${prakritiScores.percent[dosha as keyof typeof prakritiScores.percent]}%` }}
+                                initial={{ width: 0 }}
+                                animate={{ width: `${prakritiScores.percent[dosha as keyof typeof prakritiScores.percent]}%` }}
+                                transition={{ duration: 1.5, delay: 0.3 }}
                               />
                             </div>
                           </div>
@@ -1173,17 +1598,36 @@ const PatientDashboard: React.FC = () => {
                         </p>
                         <p className="text-sm text-gray-600">{getDescription(prakritiScores.dominant)}</p>
                         <div className="mt-4 flex justify-center">
-                          <div className={`w-16 h-16 ${getColorClass(prakritiScores.dominant)} rounded-full flex items-center justify-center shadow-lg`}>
+                          <motion.div 
+                            className={`w-16 h-16 ${getColorClass(prakritiScores.dominant)} rounded-full flex items-center justify-center shadow-lg`}
+                            whileHover={{ scale: 1.1 }}
+                            animate={{ 
+                              boxShadow: [
+                                '0 10px 20px rgba(0,0,0,0.1)',
+                                '0 20px 40px rgba(0,0,0,0.2)',
+                                '0 10px 20px rgba(0,0,0,0.1)'
+                              ]
+                            }}
+                            transition={{ duration: 3, repeat: Infinity }}
+                          >
                             <span className="text-white font-bold text-lg capitalize">
                               {prakritiScores.dominant[0].toUpperCase()}
                             </span>
-                          </div>
+                          </motion.div>
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
+            
+            {/* NEW: Enhanced Visualization Component */}
+            <div className="mt-8 ayurveda-card overflow-hidden">
+              <div className="p-6">
+                <h4 className="text-xl font-bold mb-6 text-center text-gray-800">Enhanced ML Visualization</h4>
+                <PrakritiVisualizationEnhanced  scores={prakritiScores} />
               </div>
+            </div>
+          </div>
             ) : (
               <div className="mb-8">
                 <div className="ayurveda-card p-8 text-center">
@@ -1194,7 +1638,7 @@ const PatientDashboard: React.FC = () => {
                   </div>
                   <h3 className="text-xl font-semibold text-gray-800 mb-2">Complete Your Prakriti Assessment</h3>
                   <p className="text-gray-600 mb-6">
-                    Discover your unique Ayurvedic constitution and get personalized health recommendations.
+                    Discover your unique Ayurvedic constitution and get personalized health recommendations with ML-powered analysis.
                   </p>
                   <button
                     onClick={handleTakeQuestionnaire}
@@ -1228,6 +1672,15 @@ const PatientDashboard: React.FC = () => {
                         {prakritiScores.dominant === 'kapha' && 'Stay active, wake up early, engage in stimulating activities.'}
                       </p>
                     </div>
+                    {prakritiScores.ml_prediction && (
+                      <div className="p-4 bg-purple-50 rounded-lg">
+                        <h5 className="font-medium text-purple-800 mb-2">AI Insights</h5>
+                        <p className="text-sm text-purple-700">
+                          Our machine learning model analyzed your responses with {Math.round(prakritiScores.ml_prediction.confidence * 100)}% confidence. 
+                          The AI prediction aligns with traditional Ayurvedic analysis.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <p className="text-gray-500 text-center py-8">
@@ -1264,6 +1717,43 @@ const PatientDashboard: React.FC = () => {
                 )}
               </div>
             </div>
+          </>
+        )}
+
+        {/* Visualization View - NEW IMPLEMENTATION */}
+        {activeView === 'visualization' && (
+          <>
+            <div className="mb-8">
+              <h2 className="text-3xl font-bold mb-2" style={{ color: theme === 'dark' ? 'var(--accent-gold-3)' : 'var(--muted-brown)' }}>Prakriti Visualization</h2>
+              <p className={theme === 'dark' ? 'text-amber-200' : 'text-gray-700'}>Interactive charts and graphs showing your Prakriti analysis</p>
+            </div>
+
+            {prakritiScores ? (
+              <div className="mb-8">
+                <PrakritiVisualizationEnhanced  scores={prakritiScores} />
+              </div>
+            ) : (
+              <div className="mb-8">
+                <div className="ayurveda-card p-8 text-center">
+                  <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg className="w-8 h-8 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                  </div>
+                  <h3 className="text-xl font-semibold text-gray-800 mb-2">Complete Your Prakriti Assessment</h3>
+                  <p className="text-gray-600 mb-6">
+                    Discover your unique Ayurvedic constitution and visualize your results with interactive charts.
+                  </p>
+                  <button
+                    onClick={handleTakeQuestionnaire}
+                    className="px-6 py-3 rounded-lg transition-colors"
+                    style={{ background: 'linear-gradient(135deg, var(--accent-gold-1), var(--accent-gold-2))', color: '#2c1810' }}
+                  >
+                    Take Assessment Now
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
 
@@ -1356,6 +1846,10 @@ const PatientDashboard: React.FC = () => {
                 'No recent activity. Consider taking your Prakriti assessment.'
               }
             </p>
+          </div>
+
+          <div className="chat-panel">
+            <ChatWidget />
           </div>
 
           <div className="ayurveda-card p-6">

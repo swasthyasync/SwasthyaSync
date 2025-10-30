@@ -1,38 +1,55 @@
 // packages/api/src/index.ts
 import dotenv from 'dotenv';
-dotenv.config();
+
+// Force dotenv to load from this package's .env file
+import path from 'path';
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
+// Debug: log important env values
+console.log("Loaded SUPABASE_URL:", process.env.SUPABASE_URL || "<missing>");
+console.log("Loaded EMAIL_USER:", process.env.EMAIL_USER || "<missing>");
 
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import http from 'http';
+import { Server as SocketIOServer } from 'socket.io';
 
 import authRoutes from './routes/auth';
 import questionnaireRoutes from './routes/questionnaire';
+import chatRoutes from './routes/chat';
 import { authMiddleware } from './middlewares/authMiddleware';
 import { supabase } from './db/supabaseClient';
 
-// Optional: schedule cleanup or background tasks here (keep minimal)
 const PORT = Number(process.env.PORT || 4000);
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 const app = express();
 
-// Middleware
-app.use(helmet());
-app.use(cors());
+// IMPORTANT: Set up CORS FIRST before any routes
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://localhost:3001'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 200
+}));
+
+// Then other middleware
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
+
 if (NODE_ENV === 'development') {
   app.use(morgan('dev'));
 }
 
-// Basic health check
+// Basic health check (no auth required)
 app.get('/health', async (_req: Request, res: Response) => {
   try {
-    // quick DB check (supabase): try a harmless query to ensure DB reachability
-    // If you prefer not to call DB here, remove the block and just return ok.
     const { error } = await supabase.from('users').select('id').limit(1);
     if (error) {
       return res.status(503).json({ status: 'degraded', db: 'error', error: error.message });
@@ -43,13 +60,13 @@ app.get('/health', async (_req: Request, res: Response) => {
   }
 });
 
-// Mount routes
-app.use('/auth', authRoutes);
-app.use('/questionnaire', questionnaireRoutes);
+// Mount routes ONCE and with correct prefixes
+app.use('/api/auth', authRoutes);
+app.use('/api/questionnaire', questionnaireRoutes);
+app.use('/api/chat', chatRoutes);
 
 // Example protected route
 app.get('/me', authMiddleware, (req: Request, res: Response) => {
-  // authMiddleware attaches user to req
   return res.json({ user: (req as any).user });
 });
 
@@ -64,12 +81,67 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   res.status(err?.status || 500).json({ error: err?.message || 'Internal server error' });
 });
 
-// Create HTTP server to support graceful shutdown
+// Create HTTP server
 const server = http.createServer(app);
 
+// Create Socket.IO server
+const io = new SocketIOServer(server, {
+  cors: {
+    origin: ['http://localhost:3000', 'http://localhost:3001'],
+    methods: ['GET', 'POST'],
+    credentials: true
+  },
+  path: '/ws'
+});
+
+// WebSocket connection handling
+io.on('connection', (socket) => {
+  console.log('Client connected:', socket.id);
+  
+  // Handle chat messages
+  socket.on('chat-message', (data) => {
+    console.log('Received chat message:', data);
+    // Broadcast to all connected clients
+    io.emit('chat-message', data);
+  });
+  
+  // Handle typing indicators
+  socket.on('typing', (data) => {
+    socket.broadcast.emit('typing', data);
+  });
+  
+  // Handle disconnect
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+  });
+});
+
 function start() {
+  server.on('error', (e: any) => {
+    if (e.code === 'EADDRINUSE') {
+      console.log('Address in use, retrying in 1 second...');
+      setTimeout(() => {
+        server.close();
+        server.listen(PORT);
+      }, 1000);
+    } else {
+      console.error('Server error:', e);
+    }
+  });
+
   server.listen(PORT, () => {
     console.log(`API server running (${NODE_ENV}) — listening on http://localhost:${PORT}`);
+    console.log(`WebSocket server running on ws://localhost:${PORT}/ws`);
+    console.log('Available routes:');
+    console.log('  - GET  /health');
+    console.log('  - POST /auth/send-otp');
+    console.log('  - POST /auth/verify-otp');
+    console.log('  - POST /auth/register');
+    console.log('  - POST /questionnaire/submit');
+    console.log('  - GET  /api/chat/threads');
+    console.log('  - POST /api/chat/threads');
+    console.log('  - POST /api/chat/messages');
+    console.log('  - WS   /ws (WebSocket)');
   });
 }
 
@@ -83,8 +155,6 @@ function shutdown(signal?: string) {
     }
 
     try {
-      // any cleanup tasks: close DB connections if needed
-      // supabase client does not require an explicit close in the JS client
       console.log('Server closed. Exiting.');
       process.exit(0);
     } catch (ex) {
@@ -93,7 +163,6 @@ function shutdown(signal?: string) {
     }
   });
 
-  // if server doesn't close within X ms, force exit
   setTimeout(() => {
     console.warn('Forcing shutdown.');
     process.exit(1);
@@ -108,15 +177,28 @@ process.on('uncaughtException', (err) => {
 });
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled Rejection:', reason);
-  // keep running briefly to log, then exit
-  shutdown('unhandledRejection');
+  // Log but don't shut down for unhandled rejections
 });
 
-// Only start if this module is run directly (useful for tests importing app)
+// Only start if run directly
 if (require.main === module) {
-  start();
+  // Test database connection before starting server
+  (async () => {
+    try {
+      console.log('\n=== TESTING DATABASE CONNECTION ===');
+      // Use the users table instead of a test table
+      const { data, error } = await supabase.from('users').select('id').limit(1);
+      if (error) throw error;
+      console.log('✅ Basic connection successful; sample rows:', data);
+
+      // Start the server
+      start();
+    } catch (err) {
+      console.error('❌ Database connection test failed:', err);
+      process.exit(1);
+    }
+  })();
 }
 
-// Export app & server for testing
-export { app, server };
+export { app, server, io };
 export default app;

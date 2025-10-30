@@ -21,7 +21,15 @@ const PhoneEntry: React.FC = () => {
   };
 
   // Use phoneFromUrl to prefill the phone input if available
-const [phoneNumber, setPhoneNumber] = useState(phoneFromUrl || '');
+  const [phoneNumber, setPhoneNumber] = useState(phoneFromUrl || '');
+
+  // Format phone number for display (adds spaces)
+  const formatPhoneDisplay = (value: string) => {
+    const digits = value.replace(/\D/g, '');
+    if (digits.length <= 5) return digits;
+    if (digits.length <= 10) return `${digits.slice(0, 5)} ${digits.slice(5)}`;
+    return `${digits.slice(0, 5)} ${digits.slice(5, 10)}`;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,11 +39,14 @@ const [phoneNumber, setPhoneNumber] = useState(phoneFromUrl || '');
     try {
       setLoading(true);
       let res;
+      
       if (mode === 'phone') {
         if (!validatePhone(phone)) {
           setError('Enter a valid 10-digit phone number');
           return;
         }
+        
+        console.log('[PhoneEntry] Sending OTP to phone:', phone);
         res = await api.sendOTPByPhone(phone);
         sessionStorage.setItem('pendingIdentifierType', 'phone');
         sessionStorage.setItem('pendingIdentifierValue', phone);
@@ -44,15 +55,48 @@ const [phoneNumber, setPhoneNumber] = useState(phoneFromUrl || '');
           setError('Enter a valid email address');
           return;
         }
+        
+        console.log('[PhoneEntry] Sending OTP to email:', email);
         res = await api.sendOTPByEmail(email);
         sessionStorage.setItem('pendingIdentifierType', 'email');
         sessionStorage.setItem('pendingIdentifierValue', email);
       }
 
-      console.log('OTP Response:', res);
-      navigate('/auth/verify-otp');
+      console.log('[PhoneEntry] OTP Response:', res);
+
+      if (res && res.success) {
+        // Show development OTP if available
+        if (res.displayOTP && res.otp) {
+          console.log('🔐 DEV MODE - OTP:', res.otp);
+          // You can show this in UI for development
+          alert(`DEV MODE - Your OTP is: ${res.otp}`);
+        }
+        
+        navigate('/auth/verify-otp');
+      } else {
+        throw new Error(res?.error || res?.message || 'Failed to send OTP');
+      }
     } catch (err: any) {
-      setError(err?.message || 'Failed to send OTP');
+      console.error('[PhoneEntry] Error:', err);
+      
+      let errorMessage = 'Failed to send OTP';
+      
+      if (err?.message) {
+        if (err.message.includes('Unsupported phone provider')) {
+          errorMessage = 'Phone OTP is not available for your region. Please try email instead.';
+          setMode('email'); // Switch to email automatically
+        } else if (err.message.includes('Invalid Indian phone number')) {
+          errorMessage = 'Please enter a valid Indian mobile number (10 digits starting with 6-9)';
+        } else if (err.message.includes('phone number')) {
+          errorMessage = 'Invalid phone number format';
+        } else if (err.message.includes('email')) {
+          errorMessage = 'Invalid email address format';
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -211,42 +255,97 @@ const [phoneNumber, setPhoneNumber] = useState(phoneFromUrl || '');
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="relative rounded-2xl border-2 overflow-hidden"
-              style={{ background: 'rgba(255, 248, 220, 0.6)' }}>
+              style={{ 
+                background: 'rgba(255, 248, 220, 0.6)',
+                borderColor: error ? '#cd853f' : 'rgba(218, 165, 32, 0.3)'
+              }}>
               {mode === 'phone' ? (
-                <input type="tel" value={phone}
-                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
-                  className="w-full p-4 bg-transparent outline-none font-medium"
-                  placeholder="Enter phone number" maxLength={10} autoFocus
-                  style={{ color: '#2c1810' }} />
+                <div className="flex items-center">
+                  <span className="px-4 py-4 text-sm font-medium" style={{ color: '#8b6914' }}>
+                    +91
+                  </span>
+                  <input 
+                    type="tel" 
+                    value={phone}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/\D/g, '');
+                      if (digits.length <= 10) {
+                        setPhone(digits);
+                      }
+                    }}
+                    className="flex-1 p-4 bg-transparent outline-none font-medium"
+                    placeholder="Enter mobile number" 
+                    maxLength={10} 
+                    autoFocus
+                    style={{ color: '#2c1810' }} 
+                  />
+                </div>
               ) : (
-                <input type="email" value={email}
+                <input 
+                  type="email" 
+                  value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full p-4 bg-transparent outline-none font-medium"
-                  placeholder="Enter email address" autoFocus
-                  style={{ color: '#2c1810' }} />
+                  placeholder="Enter email address" 
+                  autoFocus
+                  style={{ color: '#2c1810' }} 
+                />
               )}
             </div>
 
+            {/* Helper text */}
+            {mode === 'phone' && (
+              <div className="text-xs px-2" style={{ color: '#8b6914' }}>
+                Enter 10-digit mobile number (without +91)
+              </div>
+            )}
+
             {error && (
-              <div className="flex items-center gap-2 p-2 rounded-lg border text-sm error-shake"
-                style={{ color: '#a0522d', background: 'rgba(205, 133, 63, 0.1)' }}>
+              <div className="flex items-center gap-2 p-3 rounded-lg border text-sm error-shake"
+                style={{ 
+                  color: '#a0522d', 
+                  background: 'rgba(205, 133, 63, 0.1)',
+                  borderColor: 'rgba(205, 133, 63, 0.3)'
+                }}>
                 ⚠️ {error}
               </div>
             )}
 
-            <button type="submit" disabled={loading}
+            <button 
+              type="submit" 
+              disabled={loading || (mode === 'phone' ? !phone || phone.length < 10 : !email)}
               className={`relative w-full p-4 rounded-2xl font-bold transition-all duration-300 ${
                 loading ? 'opacity-70 cursor-not-allowed healing-pulse' : 'hover:-translate-y-0.5'
               }`}
-              style={{ background: 'linear-gradient(135deg, #b8860b, #daa520, #ffd700)', color: '#2c1810' }}>
+              style={{ 
+                background: (loading || (mode === 'phone' ? !phone || phone.length < 10 : !email))
+                  ? 'rgba(184, 134, 11, 0.5)' 
+                  : 'linear-gradient(135deg, #b8860b, #daa520, #ffd700)', 
+                color: '#2c1810' 
+              }}
+            >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
                   <div className="w-5 h-5 border-2 border-amber-800 border-opacity-30 border-t-amber-800 rounded-full animate-spin" />
-                  Sending...
+                  Sending OTP...
                 </span>
-              ) : 'Get OTP'}
+              ) : (
+                `Get OTP ${mode === 'phone' ? 'via SMS' : 'via Email'}`
+              )}
             </button>
           </form>
+
+          {/* Development note */}
+          {process.env.NODE_ENV === 'development' && (
+            <div className="mt-4 p-3 rounded-lg text-xs text-center"
+              style={{ 
+                background: 'rgba(255, 193, 7, 0.1)',
+                color: '#8b6914',
+                border: '1px solid rgba(255, 193, 7, 0.3)'
+              }}>
+              💡 Development Mode: OTP will be shown in console/alert
+            </div>
+          )}
         </div>
       </div>
     </>

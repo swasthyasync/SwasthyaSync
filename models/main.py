@@ -5,21 +5,26 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional
-from inference import predict_from_answers
-import inference
+from inference_updated import predict_from_answers
+import inference_updated as inference
 from dotenv import load_dotenv
 
 load_dotenv()
 
 app = FastAPI(title="SwasthyaSync ML Inference API", version="1.0.0")
 
+# Port configuration
+PORT = int(os.getenv("ML_SERVICE_PORT", "8000"))
+HOST = os.getenv("ML_SERVICE_HOST", "0.0.0.0")
+
 # CORS middleware for frontend integration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure for production
+    allow_origins=["http://localhost:3000", "http://localhost:8000", "http://127.0.0.1:8000", "http://127.0.0.1:3000"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 # Request logging middleware to debug 405 errors
@@ -95,14 +100,21 @@ async def predict_prakriti(req: PredictRequest):
     Expected input format:
     {
         "answers": [
-            {"questionId": "q1", "value": "Thin, light, and narrow", "trait": "vata", "weight": 1},
-            {"questionId": "q2", "value": "Dry, rough, and thin", "trait": "vata", "weight": 1},
-            ...
+            {
+                "questionId": "string",  # Optional
+                "value": "string",       # Optional
+                "trait": "string",       # Required - The trait being measured
+                "weight": float         # Required - Weight/score for this trait
+            }
         ]
     }
     """
     try:
+        # Log the prediction request and answers for debugging
         print(f"📊 Processing prediction request with {len(req.answers) if req.answers else 0} answers")
+        print("📝 Received answers from frontend:")
+        for idx, answer in enumerate(req.answers):
+            print(f"  {idx + 1}. Trait: {answer.get('trait', 'N/A')}, Weight: {answer.get('weight', 'N/A')}")
         
         # Validate input
         if not req.answers:
@@ -115,7 +127,7 @@ async def predict_prakriti(req: PredictRequest):
             raise HTTPException(status_code=500, detail="Prediction failed")
         
         print(f"✅ Prediction successful: {result.get('prakriti', {}).get('dominant', 'unknown')}")
-        return PredictResponse(**result)
+        return result
         
     except FileNotFoundError as fe:
         print(f"❌ Model file not found: {fe}")
@@ -226,11 +238,41 @@ async def global_exception_handler(request: Request, exc: Exception):
         detail="An unexpected error occurred"
     )
 
+def find_available_port(start_port: int, max_attempts: int = 10) -> int:
+    """Find an available port starting from start_port"""
+    for port_offset in range(max_attempts):
+        port = start_port + port_offset
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind((HOST, port))
+                return port
+        except OSError:
+            continue
+    raise OSError(f"Could not find an available port after {max_attempts} attempts")
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", 8000)),
-        reload=os.getenv("ENV") == "development"
-    )
+    import socket
+    import sys
+    
+    try:
+        port = find_available_port(PORT)
+        print(f"✅ Found available port: {port}")
+        print(f"🚀 Starting ML service on http://{HOST}:{port}")
+        
+        uvicorn.run(
+            app="main:app",
+            host=HOST,
+            port=port,
+            log_level="info",
+            reload=False,
+            workers=1,
+            lifespan="on",
+            timeout_keep_alive=30
+        )
+    except KeyboardInterrupt:
+        print("\n⚠️ Shutting down gracefully...")
+        sys.exit(0)
+    except Exception as e:
+        print(f"❌ Failed to start server: {e}")
+        sys.exit(1)

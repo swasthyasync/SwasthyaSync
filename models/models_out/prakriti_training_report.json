@@ -1,33 +1,33 @@
 {
   "kapha": {
-    "precision": 1.0,
-    "recall": 1.0,
-    "f1-score": 1.0,
-    "support": 37.0
+    "precision": 0.3103448275862069,
+    "recall": 0.2727272727272727,
+    "f1-score": 0.2903225806451613,
+    "support": 33.0
   },
   "pitta": {
-    "precision": 1.0,
-    "recall": 1.0,
-    "f1-score": 1.0,
-    "support": 32.0
+    "precision": 0.2727272727272727,
+    "recall": 0.24324324324324326,
+    "f1-score": 0.2571428571428571,
+    "support": 37.0
   },
   "vata": {
-    "precision": 1.0,
-    "recall": 1.0,
-    "f1-score": 1.0,
-    "support": 31.0
+    "precision": 0.2631578947368421,
+    "recall": 0.3333333333333333,
+    "f1-score": 0.29411764705882354,
+    "support": 30.0
   },
-  "accuracy": 1.0,
+  "accuracy": 0.28,
   "macro avg": {
-    "precision": 1.0,
-    "recall": 1.0,
-    "f1-score": 1.0,
+    "precision": 0.28207666501677386,
+    "recall": 0.2831012831012831,
+    "f1-score": 0.2805276949489473,
     "support": 100.0
   },
   "weighted avg": {
-    "precision": 1.0,
-    "recall": 1.0,
-    "f1-score": 1.0,
+    "precision": 0.28227025243359183,
+    "recall": 0.28,
+    "f1-score": 0.2791846028734074,
     "support": 100.0
   }
 }

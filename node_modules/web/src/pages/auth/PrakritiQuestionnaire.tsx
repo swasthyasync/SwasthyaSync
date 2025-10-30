@@ -1,8 +1,10 @@
 // apps/web/src/pages/auth/PrakritiQuestionnaire.tsx
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import toast from 'react-hot-toast';
 import { prakritiQuestions, mentalHealthQuestions, Question } from '../../utils/questions';
+import { supabase } from '../../utils/supabase';
 import api from '../../utils/api';
 
 interface Answer {
@@ -12,22 +14,99 @@ interface Answer {
   weight: number;
 }
 
-const PrakritiQuestionnaire: React.FC = () => {
+const PrakritiQuestionnaire: React.FC<{}> = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [currentPage, setCurrentPage] = useState(0);
   const [answers, setAnswers] = useState<Answer[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [userId, setUserId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loadingQuestions, setLoadingQuestions] = useState(true);
 
-  // Combine all questions and split into 2 pages
   const allQuestions = [...prakritiQuestions, ...mentalHealthQuestions];
   const midPoint = Math.ceil(allQuestions.length / 2);
   const page1Questions = allQuestions.slice(0, midPoint);
   const page2Questions = allQuestions.slice(midPoint);
   const currentQuestions = currentPage === 0 ? page1Questions : page2Questions;
 
-  // Calculate progress
   const progress = currentPage === 0 ? 50 : 100;
+
+  // Load saved progress
+  useEffect(() => {
+    const savedAnswers = localStorage.getItem('prakritiAnswers');
+    const savedPage = localStorage.getItem('prakritiPage');
+    if (savedAnswers) {
+      setAnswers(JSON.parse(savedAnswers));
+    }
+    if (savedPage) {
+      setCurrentPage(parseInt(savedPage));
+    }
+    setLoadingQuestions(false);
+  }, []);
+
+  // Save progress when answers change
+  useEffect(() => {
+    localStorage.setItem('prakritiAnswers', JSON.stringify(answers));
+    localStorage.setItem('prakritiPage', currentPage.toString());
+  }, [answers, currentPage]);
+
+  // Check authentication on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const stateUserId = (location.state as any)?.userId;
+        if (stateUserId) {
+          setUserId(stateUserId);
+          return;
+        }
+
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user?.id) {
+            setUserId(session.user.id);
+            return;
+          }
+        } catch {}
+
+        const fallbackToken =
+          localStorage.getItem('authToken') ||
+          localStorage.getItem('token') ||
+          localStorage.getItem('accessToken') ||
+          null;
+
+        if (!fallbackToken) {
+          navigate('/auth/phone');
+          return;
+        }
+
+        try {
+          const verifyResp = await api.get('/auth/verify');
+          if (verifyResp?.success && verifyResp.user?.id) {
+            setUserId(verifyResp.user.id);
+            return;
+          } else {
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('token');
+            localStorage.removeItem('accessToken');
+            navigate('/auth/phone');
+            return;
+          }
+        } catch {
+          localStorage.removeItem('authToken');
+          localStorage.removeItem('token');
+          localStorage.removeItem('accessToken');
+          navigate('/auth/phone');
+          return;
+        }
+      } catch {
+        navigate('/auth/phone');
+      }
+    };
+
+    checkAuth();
+  }, [location.state, navigate]);
 
   const handleAnswer = (question: Question, optionId: string) => {
     const option = question.options.find(o => o.id === optionId);
@@ -62,55 +141,54 @@ const PrakritiQuestionnaire: React.FC = () => {
   const handleNext = () => {
     if (currentPage === 0 && canProceed()) {
       setCurrentPage(1);
-      window.scrollTo(0, 0);
+      window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
     }
   };
 
   const handlePrev = () => {
     if (currentPage === 1) {
       setCurrentPage(0);
-      window.scrollTo(0, 0);
+      window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
     }
   };
 
-  const calculatePrakritiScores = () => {
-    const scores: Record<'vata' | 'pitta' | 'kapha', number> = {
-      vata: 0,
-      pitta: 0,
-      kapha: 0
-    };
-
+  const calculateScores = (answers: Answer[]) => {
+    const scores = { vata: 0, pitta: 0, kapha: 0 };
     answers.forEach(answer => {
-      scores[answer.trait] += answer.weight;
+      if (answer.trait && (scores as any).hasOwnProperty(answer.trait)) {
+        (scores as any)[answer.trait] += answer.weight;
+      }
     });
-
-    const total = scores.vata + scores.pitta + scores.kapha;
-    if (total === 0) {
-      return { vata: 0, pitta: 0, kapha: 0, dominant: 'vata' as 'vata' | 'pitta' | 'kapha' };
-    }
-
-    const pct = {
+    const total = scores.vata + scores.pitta + scores.kapha || 1;
+    const percent = {
       vata: Math.round((scores.vata / total) * 100),
       pitta: Math.round((scores.pitta / total) * 100),
       kapha: Math.round((scores.kapha / total) * 100)
     };
 
-    const dominant = (Object.keys(scores) as Array<'vata' | 'pitta' | 'kapha'>).reduce((best, key) =>
-      scores[key] > scores[best] ? key : best, 'vata'
-    );
+    let dominant: 'vata' | 'pitta' | 'kapha' = 'vata';
+    let maxScore = scores.vata;
+    if (scores.pitta > maxScore) {
+      dominant = 'pitta';
+      maxScore = scores.pitta;
+    }
+    if (scores.kapha > maxScore) {
+      dominant = 'kapha';
+    }
 
-    return { ...pct, dominant };
+    return { scores, percent, dominant };
   };
 
-  const calculateMentalHealthScore = () => {
-    const mentalAnswers = answers.filter(a => a.questionId.startsWith('mh'));
-    const totalScore = mentalAnswers.reduce((sum, a) => sum + a.weight, 0);
-    const maxScore = mentalHealthQuestions.length * 3;
-    const percentage = maxScore === 0 ? 0 : (totalScore / maxScore) * 100;
-
-    if (percentage < 30) return { level: 'green', label: 'Good', risk: 'low' };
-    if (percentage < 60) return { level: 'yellow', label: 'Moderate', risk: 'medium' };
-    return { level: 'red', label: 'Needs Attention', risk: 'high' };
+  const calculateMentalHealthScore = (answers: Answer[]) => {
+    const mentalAnswers = answers.filter(a =>
+      a.questionId.startsWith('mh') ||
+      mentalHealthQuestions.some(q => q.id === a.questionId)
+    );
+    if (mentalAnswers.length === 0) return 50;
+    const totalWeight = mentalAnswers.reduce((sum, a) => sum + a.weight, 0);
+    const maxPossible = mentalAnswers.length * 3;
+    const score = Math.round((totalWeight / maxPossible) * 100);
+    return Math.max(10, Math.min(100, score));
   };
 
   const handleSubmit = async () => {
@@ -118,36 +196,95 @@ const PrakritiQuestionnaire: React.FC = () => {
       setError('Please answer all questions before submitting');
       return;
     }
+    if (!userId) {
+      setError('User not authenticated. Please login again.');
+      navigate('/auth/phone');
+      return;
+    }
 
     setLoading(true);
+    setIsSubmitting(true);
     setError('');
 
-    try {
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
-      const prakritiScores = calculatePrakritiScores();
-      const mentalHealthScore = calculateMentalHealthScore();
+    // Show user feedback
+    const toastId = 'submit-toast';
+    toast.loading('Submitting your responses...', { id: toastId });
 
-      await api.submitQuestionnaire(user.id, {
-        answers: answers,
-        prakritiScores,
-        mentalHealthScore,
-        completedAt: new Date().toISOString()
+    try {
+      // Validate answers before submission
+      if (answers.length < 5) {
+        throw new Error('Please answer at least 5 questions for accurate prediction');
+      }
+
+      // Submit answers to backend API
+      const response = await api.post('/questionnaire/submit', {
+        userId,
+        answers,
+        questionnaire_type: 'prakriti'
       });
 
-      localStorage.setItem('prakritiResults', JSON.stringify({
-        scores: prakritiScores,
-        mentalHealth: mentalHealthScore
-      }));
+      // Fix: Check for the correct response structure
+      if (!response?.questionnaire?.scores) {
+        throw new Error('Invalid response from prediction service');
+      }
 
-      navigate('/patient/dashboard');
-    } catch (err: any) {
-      setError(err?.message || 'Failed to submit questionnaire');
+      console.log('[Debug] Questionnaire submission response:', response);
+      
+      // Clear saved progress after successful submission
+      localStorage.removeItem('prakritiAnswers');
+      localStorage.removeItem('prakritiPage');
+      
+      toast.success('Assessment completed successfully!', { id: toastId });
+
+      // Fix: Use the correct path to access scores
+      if (response.questionnaire) {
+        // Navigate to dashboard with the scores
+        navigate('/patient/dashboard', {
+          state: { prakritiScores: response.questionnaire.scores }
+        });
+      } else {
+        setError('Failed to process questionnaire results');
+      }
+    } catch (err) {
+      console.error('Failed to submit questionnaire:', err);
+      setError('Failed to submit questionnaire. Please try again.');
+      toast.error('Failed to submit. Please try again.', { id: toastId });
     } finally {
       setLoading(false);
+      setIsSubmitting(false);
     }
   };
 
-  return (
+
+  // Show loading while checking auth or loading questions
+  if (!userId || loadingQuestions) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" 
+        style={{
+          background: `
+            radial-gradient(ellipse at top left, rgba(255, 183, 77, 0.15), transparent 40%),
+            radial-gradient(ellipse at bottom right, rgba(139, 69, 19, 0.2), transparent 40%),
+            linear-gradient(135deg, #2c1810 0%, #3d2817 25%, #4a3420 50%, #3d2817 75%, #2c1810 100%)
+          `
+        }}
+      >
+        <div className="text-center">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center text-4xl animate-pulse"
+            style={{
+              background: 'linear-gradient(135deg, #b8860b, #daa520, #ffd700)',
+              boxShadow: '0 0 30px rgba(255, 215, 0, 0.5)'
+            }}
+          >
+            🕉️
+          </div>
+          <p className="text-lg" style={{ color: '#ffd700' }}>
+            Preparing your assessment...
+          </p>
+        </div>
+      </div>
+    );
+  }
+ return (
     <>
       {/* Ayurvedic Styles */}
       <style>{`
@@ -417,7 +554,7 @@ const PrakritiQuestionnaire: React.FC = () => {
             </motion.div>
           )}
 
-          {/* Navigation Buttons */}
+          {/* Navigation Buttons - only change is in handleSubmit above */}
           <div className="flex justify-between items-center">
             <button
               onClick={currentPage === 0 ? () => navigate(-1) : handlePrev}
