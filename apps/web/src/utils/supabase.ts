@@ -9,6 +9,11 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true
+  },
+  global: {
+    headers: {
+      apikey: supabaseAnonKey
+    }
   }
 })
 
@@ -84,7 +89,7 @@ export const authService = {
     if (storedUser) {
       try {
         const parsed = JSON.parse(storedUser) as User;
-        console.log('[authService] Loaded user from localStorage:', parsed.id);
+        console.log('[authService] Loaded user from localStorage:', parsed.id, 'Role:', parsed.role);
         return parsed;
       } catch (e) {
         console.error('[authService] Failed parsing localStorage user:', e);

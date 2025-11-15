@@ -1,0 +1,29 @@
+{
+  "name": "swasthyasync-nutrition-models",
+  "version": "1.0.0",
+  "description": "Nutrition models and data import scripts for SwasthyaSync",
+  "main": "index.js",
+  "scripts": {
+    "import-nutrition-data": "node import_nutrition_data.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "nutrition",
+    "ayurveda",
+    "swasthyasync"
+  ],
+  "author": "SwasthyaSync Team",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.38.0",
+    "csv-parser": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.2.0"
+  },
+  "comments": {
+    "csv-parser": "Using require() instead of import for csv-parser because @types/csv-parser is not available"
+  }
+}

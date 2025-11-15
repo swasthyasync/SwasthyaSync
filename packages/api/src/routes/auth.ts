@@ -15,8 +15,6 @@ const asyncHandler =
 // -------------------- PUBLIC AUTH ROUTES --------------------
 
 // Send OTP to phone or email
-router.post('/send-otp', authController.sendOTP);
-
 router.post('/send-otp', asyncHandler(authController.sendOTP));
 
 // Verify OTP → returns token + user (existing) OR requires registration (new user)
@@ -25,8 +23,7 @@ router.post('/verify-otp', asyncHandler(authController.verifyOTP));
 // Register new patient (after OTP verification for new users)
 router.post('/register', asyncHandler(authController.register));
 
-
-// Practitioner/Admin login with email + password
+// Practitioner/Admin login with email + password (keeping this for backward compatibility)
 router.post('/login', asyncHandler(authController.login));
 
 // Refresh JWT token (client provides old token)

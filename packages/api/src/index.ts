@@ -19,6 +19,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import authRoutes from './routes/auth';
 import questionnaireRoutes from './routes/questionnaire';
 import chatRoutes from './routes/chat';
+import nutritionRoutes from './routes/nutrition';
 import { authMiddleware } from './middlewares/authMiddleware';
 import { supabase } from './db/supabaseClient';
 
@@ -64,6 +65,7 @@ app.get('/health', async (_req: Request, res: Response) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/questionnaire', questionnaireRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/nutrition', nutritionRoutes);
 
 // Example protected route
 app.get('/me', authMiddleware, (req: Request, res: Response) => {
@@ -134,13 +136,23 @@ function start() {
     console.log(`WebSocket server running on ws://localhost:${PORT}/ws`);
     console.log('Available routes:');
     console.log('  - GET  /health');
-    console.log('  - POST /auth/send-otp');
-    console.log('  - POST /auth/verify-otp');
-    console.log('  - POST /auth/register');
-    console.log('  - POST /questionnaire/submit');
+    console.log('  - POST /api/auth/send-otp');
+    console.log('  - POST /api/auth/verify-otp');
+    console.log('  - POST /api/auth/register');
+    console.log('  - POST /api/questionnaire/submit');
     console.log('  - GET  /api/chat/threads');
     console.log('  - POST /api/chat/threads');
     console.log('  - POST /api/chat/messages');
+    console.log('  - GET  /api/nutrition/foods');
+    console.log('  - GET  /api/nutrition/foods/:id');
+    console.log('  - POST /api/nutrition/diet/generate');
+    console.log('  - POST /api/nutrition/diet/recommendations');
+    console.log('  - GET  /api/nutrition/diet/recommendations');
+    console.log('  - POST /api/nutrition/meals/log');
+    console.log('  - GET  /api/nutrition/meals/logs');
+    console.log('  - POST /api/nutrition/feedback');
+    console.log('  - POST /api/nutrition/dietitian/recommendations');
+    console.log('  - GET  /api/nutrition/dietitian/recommendations');
     console.log('  - WS   /ws (WebSocket)');
   });
 }

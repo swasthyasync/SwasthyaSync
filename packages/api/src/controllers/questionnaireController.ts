@@ -192,7 +192,8 @@ export const questionnaireController = {
           console.warn('Could not update user onboarding status:', uerr);
         }
 
-        return res.json({
+        // Send immediate response to frontend
+        const responsePayload = {
           success: true,
           questionnaire: {
             id: data.id,
@@ -204,11 +205,19 @@ export const questionnaireController = {
             recommendations: generateBasicRecommendations(dominant)
           },
           message: 'Questionnaire submitted successfully!'
-        });
+        };
+
+        // Send response immediately
+        res.json(responsePayload);
+
+        // Log completion after response is sent
+        console.log('✅ Questionnaire processing completed for user:', userId);
       } catch (dbError: any) {
         console.warn('⚠️ DB insert failed, falling back to memory store:', dbError?.message || dbError);
         memoryQuestionnaireStore.set(questionnaireId, questionnaireData);
-        return res.json({
+        
+        // Send response even if DB fails
+        res.json({
           success: true,
           questionnaire: questionnaireData,
           message: 'Questionnaire saved in memory (DB unavailable)'
@@ -216,7 +225,10 @@ export const questionnaireController = {
       }
     } catch (error: any) {
       console.error('❌ Questionnaire submission error:', error);
-      return res.status(500).json({ error: 'Failed to submit questionnaire', details: error?.message });
+      // Only send error response if headers haven't been sent
+      if (!res.headersSent) {
+        return res.status(500).json({ error: 'Failed to submit questionnaire', details: error?.message });
+      }
     }
   },
 

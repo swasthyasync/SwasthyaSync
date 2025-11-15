@@ -128,61 +128,71 @@ const OTPVerify: React.FC = () => {
       }
 
       // Existing user flow
-     // In OTPVerify.tsx, replace the handleSubmit function's success handling:
+      const user = response.user;
+      const token = response.token || response.access_token || null;
 
-// Existing user flow (around line 100-130)
-// In OTPVerify.tsx handleSubmit function, replace the success section:
+      if (!user) {
+        console.error('[OTPVerify] No user data in response for existing user');
+        setError('User authentication failed. Please try again.');
+        return;
+      }
 
-// Existing user flow
-const user = response.user;
-const token = response.token || response.access_token || null;
+      console.log('[OTPVerify] Existing user found:', user.id);
 
-if (!user) {
-  console.error('[OTPVerify] No user data in response for existing user');
-  setError('User authentication failed. Please try again.');
-  return;
-}
+      // Clear pending identifier
+      sessionStorage.removeItem('pendingIdentifierType');
+      sessionStorage.removeItem('pendingIdentifierValue');
 
-console.log('[OTPVerify] Existing user found:', user.id);
+      // Try to create Supabase session if possible, otherwise use localStorage
+      try {
+        if (token) {
+          // If your backend returns a Supabase-compatible JWT token
+          const { data, error } = await supabase.auth.setSession({
+            access_token: token,
+            refresh_token: token
+          });
 
-// Clear pending identifier
-sessionStorage.removeItem('pendingIdentifierType');
-sessionStorage.removeItem('pendingIdentifierValue');
+          if (error) {
+            console.warn('[OTPVerify] Could not set Supabase session:', error.message);
+            // Fallback to localStorage
+            localStorage.setItem('user', JSON.stringify(user));
+            localStorage.setItem('authToken', token); // Store the token as well
+          } else {
+            console.log('[OTPVerify] Supabase session created successfully');
+          }
+        } else {
+          // No token, use localStorage only
+          localStorage.setItem('user', JSON.stringify(user));
+          if (token) {
+            localStorage.setItem('authToken', token); // Store the token as well
+          }
+        }
+      } catch (sessionError) {
+        console.warn('[OTPVerify] Session creation failed:', sessionError);
+        localStorage.setItem('user', JSON.stringify(user));
+        if (token) {
+          localStorage.setItem('authToken', token); // Store the token as well
+        }
+      }
 
-// Try to create Supabase session if possible, otherwise use localStorage
-try {
-  if (token) {
-    // If your backend returns a Supabase-compatible JWT token
-    const { data, error } = await supabase.auth.setSession({
-      access_token: token,
-      refresh_token: token
-    });
-
-    if (error) {
-      console.warn('[OTPVerify] Could not set Supabase session:', error.message);
-      // Fallback to localStorage
-      localStorage.setItem('user', JSON.stringify(user));
-      localStorage.setItem('token', token);
-    } else {
-      console.log('[OTPVerify] Supabase session created successfully');
-    }
-  } else {
-    // No token, use localStorage only
-    localStorage.setItem('user', JSON.stringify(user));
-  }
-} catch (sessionError) {
-  console.warn('[OTPVerify] Session creation failed:', sessionError);
-  localStorage.setItem('user', JSON.stringify(user));
-}
-
-// Navigate based on questionnaire completion
-if (user.questionnaire_completed || user.onboarding_completed) {
-  console.log('[OTPVerify] User has completed questionnaire - going to dashboard');
-  navigate('/patient/dashboard');
-} else {
-  console.log('[OTPVerify] User needs questionnaire - going to assessment');
-  navigate('/auth/prakriti-questionnaire', { state: { userId: user.id } });
-}
+      // Navigate based on user role and questionnaire completion
+      console.log('[OTPVerify] User object:', user);
+      console.log('[OTPVerify] User role:', user.role);
+      console.log('[OTPVerify] User type:', typeof user.role);
+      
+      if (user.role === 'practitioner' || user.role === 'admin') {
+        // Practitioners and admins go directly to their dashboard without Prakriti questionnaire
+        console.log('[OTPVerify] Practitioner/Admin user - going to practitioner dashboard');
+        navigate('/practitioner/dashboard');
+      } else if (user.questionnaire_completed || user.onboarding_completed) {
+        // Regular patients who have completed questionnaire go to patient dashboard
+        console.log('[OTPVerify] Patient has completed questionnaire - going to dashboard');
+        navigate('/patient/dashboard');
+      } else {
+        // Regular patients who haven't completed questionnaire go to Prakriti assessment
+        console.log('[OTPVerify] Patient needs questionnaire - going to assessment');
+        navigate('/auth/prakriti-questionnaire', { state: { userId: user.id } });
+      }
       return;
     } catch (err: any) {
       console.error('[OTPVerify] Verification error:', err);

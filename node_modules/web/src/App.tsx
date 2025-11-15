@@ -17,9 +17,8 @@ import PrakritiQuestionnaire from './pages/auth/PrakritiQuestionnaire';
 // Dashboard Pages
 import PatientDashboard from './pages/patient/Dashboard';
 import PractitionerDashboard from './pages/practitioner/Dashboard';
+import NutritionManagement from './pages/practitioner/NutritionManagement';
 import AdminDashboard from './pages/admin/Dashboard';
-
-import PractitionerLogin from './pages/auth/PractitionerLogin';
 
 // Protected Route Component
 const ProtectedRoute: React.FC<{ 
@@ -79,23 +78,28 @@ const ProtectedRoute: React.FC<{
   }
 
   if (!user) {
+    console.log('[ProtectedRoute] No user, redirecting to /auth/phone');
     return <Navigate to="/auth/phone" replace />;
   }
 
+  console.log('[ProtectedRoute] User found:', user.id, 'Role:', user.role);
+  console.log('[ProtectedRoute] Allowed roles:', allowedRoles);
+
   if (allowedRoles && !allowedRoles.includes(user.role)) {
-  switch (user.role) {
-    case 'admin':
-      return <Navigate to="/admin/dashboard" replace />;
-    case 'practitioner':
-      return <Navigate to="/practitioner/dashboard" replace />;
-    case 'patient':
-       return <Navigate to="/patient/dashboard" replace />;   // ✅ FIXED
-    default:
-      return <Navigate to="/auth/phone" replace />;
+    console.log('[ProtectedRoute] User role not allowed, current role:', user.role, 'Allowed roles:', allowedRoles);
+    switch (user.role) {
+      case 'admin':
+        return <Navigate to="/admin/dashboard" replace />;
+      case 'practitioner':
+        return <Navigate to="/practitioner/dashboard" replace />;
+      case 'patient':
+         return <Navigate to="/patient/dashboard" replace />;   // ✅ FIXED
+      default:
+        return <Navigate to="/auth/phone" replace />;
+    }
   }
-}
 
-
+  console.log('[ProtectedRoute] User authorized, rendering children');
   return <>{children}</>;
 };
 
@@ -159,10 +163,6 @@ function App() {
           <Route path="/auth/register" element={<PatientRegister />} />
           <Route path="/auth/prakriti-questionnaire" element={<PrakritiQuestionnaire />} />
           
-           {/* Practitioner Login Route */}
-            <Route path="/auth/practitioner" element={<PractitionerLogin />} />
-            
-            
           {/* Universal Dashboard - shows different content based on role */}
           <Route 
             path="/dashboard" 
@@ -197,6 +197,7 @@ function App() {
       <ProtectedRoute allowedRoles={['practitioner']}>
         <Routes>
           <Route path="dashboard" element={<PractitionerDashboard />} />
+          <Route path="nutrition" element={<NutritionManagement />} />
         </Routes>
       </ProtectedRoute>
     } 

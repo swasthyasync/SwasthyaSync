@@ -514,6 +514,13 @@ console.log('[ApiService] Making request to:', url);
   async getHealthProgress(timeframe?: string) {
     return this.get(`/analytics/health-progress/my?timeframe=${timeframe || '3months'}`);
   }
+
+  // Nutrition APIs
+  async getNutritionFoodsByDosha(dosha: string, foodGroup?: string) {
+    const endpoint = `/nutrition/foods/dosha/${dosha}`;
+    const queryParams = foodGroup ? `?foodGroup=${encodeURIComponent(foodGroup)}` : '';
+    return this.get(`${endpoint}${queryParams}`);
+  }
 }
 
 export default new ApiService();

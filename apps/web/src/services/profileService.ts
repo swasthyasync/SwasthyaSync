@@ -1,10 +1,12 @@
 // apps/web/src/services/profileService.ts
+import api from '../utils/api';
 import { supabase } from '../utils/supabase';
 
 export interface UserProfile {
   id: string;
   email?: string;
   phone?: string;
+  password_hash?: string;
   first_name: string;
   last_name: string;
   date_of_birth?: string;
@@ -40,12 +42,6 @@ export interface UserProfile {
   specific_concerns?: string[] | string;
   treatment_goals?: string[] | string;
   dietary_preferences?: string[] | string;
-  // Additional address fields
-  city?: string;
-  state?: string;
-  country?: string;
-  zip_code?: string;
-  phone_number?: string;
 }
 
 // Helper to parse JSONB fields from Supabase
@@ -114,20 +110,12 @@ export const profileService = {
     try {
       console.log('[profileService] Fetching profile for user ID:', userId);
 
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      if (error) {
-        console.error('[profileService] Error fetching profile:', error);
-        return null;
-      }
-
-      if (data) {
-        console.log('[profileService] Raw profile data:', data);
-        const parsed = parseProfileFields(data);
+      // Use the backend API instead of direct Supabase calls
+      const response = await api.get('/auth/me');
+      
+      if (response && response.success) {
+        console.log('[profileService] Raw profile data:', response.user);
+        const parsed = parseProfileFields(response.user);
         console.log('[profileService] Parsed profile data:', parsed);
         return parsed;
       }
@@ -144,11 +132,19 @@ export const profileService = {
       console.log('[profileService] Updating profile for user:', userId);
       console.log('[profileService] Updates:', updates);
 
+      // Filter out non-updatable fields (like phone number)
+      const allowedUpdates: Partial<UserProfile> = { ...updates };
+      // Remove phone number from updates as it should not be editable
+      delete (allowedUpdates as any).phone;
+      // Also remove id as it should never be updated
+      delete (allowedUpdates as any).id;
+
       // Prepare data for database - convert arrays and objects to JSON strings
       const dbUpdates: Record<string, any> = {};
 
-      for (const [key, value] of Object.entries(updates)) {
-        if (key === 'id' || !value) continue;
+      for (const [key, value] of Object.entries(allowedUpdates)) {
+        // Only exclude truly undefined values, allow null and empty strings
+        if (value === undefined) continue;
 
         // Array fields - convert to JSON string for JSONB storage
         if (['chronic_conditions', 'allergies', 'family_history', 'specific_concerns', 'treatment_goals', 'dietary_preferences'].includes(key)) {
@@ -164,24 +160,12 @@ export const profileService = {
         }
       }
 
-      const { data, error } = await supabase
-        .from('users')
-        .update({
-          ...dbUpdates,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', userId)
-        .select()
-        .single();
+      // Use the backend API instead of direct Supabase calls
+      const response = await api.put('/auth/profile', dbUpdates);
 
-      if (error) {
-        console.error('[profileService] Error updating profile:', error);
-        throw error;
-      }
-
-      if (data) {
+      if (response && response.success) {
         console.log('[profileService] Profile updated, parsing response');
-        const parsed = parseProfileFields(data);
+        const parsed = parseProfileFields(response.user);
         console.log('[profileService] Parsed updated profile:', parsed);
         return parsed;
       }
@@ -197,7 +181,14 @@ export const profileService = {
     userId: string,
     updates: Partial<UserProfile>
   ): Promise<UserProfile | null> {
-    return this.updateProfile(userId, updates);
+    // Filter out non-updatable fields (like phone number)
+    const allowedUpdates: Partial<UserProfile> = { ...updates };
+    // Remove phone number from updates as it should not be editable
+    delete (allowedUpdates as any).phone;
+    // Also remove id as it should never be updated
+    delete (allowedUpdates as any).id;
+    
+    return this.updateProfile(userId, allowedUpdates);
   },
 
   // ========== REAL-TIME SUBSCRIPTIONS ==========
@@ -224,7 +215,7 @@ export const profileService = {
           }
         }
       )
-      .subscribe((status) => {
+      .subscribe((status: any) => {
         console.log('[profileService] Profile subscription status:', status);
       });
 
@@ -252,7 +243,14 @@ export const profileService = {
     profileData: Partial<UserProfile>
   ) {
     try {
-      const updatedProfile = await this.updateProfile(userId, profileData);
+      // Filter out non-updatable fields (like phone number)
+      const allowedUpdates: Partial<UserProfile> = { ...profileData };
+      // Remove phone number from updates as it should not be editable
+      delete (allowedUpdates as any).phone;
+      // Also remove id as it should never be updated
+      delete (allowedUpdates as any).id;
+      
+      const updatedProfile = await this.updateProfile(userId, allowedUpdates);
       return {
         profile: updatedProfile,
       };

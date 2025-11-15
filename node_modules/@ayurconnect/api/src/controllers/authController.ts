@@ -45,22 +45,46 @@ export const authController = {
         : normalized.email!;
       await otpService.storeOTP(storeKey, otp);
 
+      let emailSent = false;
+      let smsSent = false;
+
       if (normalized.phone) {
-        await smsService.sendOTP(normalized.phone, otp);
+        try {
+          await smsService.sendOTP(normalized.phone, otp);
+          smsSent = true;
+        } catch (err) {
+          console.warn('[authController] SMS sending failed:', err);
+        }
       }
+      
       if (normalized.email) {
-        await sendMail({
-          to: normalized.email,
-          subject: `Your SwasthyaSync verification code: ${otp}`,
-          text: `Your verification code is ${otp}`,
-          html: `<p>Your verification code is <b>${otp}</b></p>`
-        });
+        try {
+          const result = await sendMail({
+            to: normalized.email,
+            subject: `Your SwasthyaSync verification code: ${otp}`,
+            text: `Your verification code is ${otp}`,
+            html: `<p>Your verification code is <b>${otp}</b></p>`
+          });
+          
+          if (result.ok) {
+            emailSent = true;
+          } else {
+            console.warn('[authController] Email sending failed:', result.error || result.message);
+          }
+        } catch (err) {
+          console.warn('[authController] Email sending failed with exception:', err);
+        }
       }
 
+      // If neither email nor SMS was sent successfully, we should still allow the user to proceed
+      // by providing the OTP directly in development mode
       return res.json({
         success: true,
-        message: 'OTP sent successfully',
-        ...(process.env.NODE_ENV !== 'production' && { otp })
+        message: 'OTP generated successfully',
+        ...(process.env.NODE_ENV !== 'production' && { otp }),
+        // Indicate which methods were successful
+        ...(normalized.phone && { smsSent }),
+        ...(normalized.email && { emailSent })
       });
     } catch (err: any) {
       console.error('❌ sendOTP error:', err);
@@ -312,31 +336,31 @@ async updateProfile(req: Request, res: Response) {
     };
 
     // Only update provided fields
-    if (firstName) updateData.first_name = firstName;
-    if (lastName) updateData.last_name = lastName;
-    if (dateOfBirth) updateData.date_of_birth = dateOfBirth;
-    if (gender) updateData.gender = gender;
-    if (address) updateData.address = address;
-    if (emergencyContact) updateData.emergency_contact = emergencyContact;
-    if (emergencyName) updateData.emergency_name = emergencyName;
-    if (emergencyRelation) updateData.emergency_relation = emergencyRelation;
-    if (occupation) updateData.occupation = occupation;
-    if (exerciseFrequency) updateData.exercise_frequency = exerciseFrequency;
-    if (sleepPattern) updateData.sleep_pattern = sleepPattern;
-    if (smokingStatus) updateData.smoking_status = smokingStatus;
-    if (alcoholConsumption) updateData.alcohol_consumption = alcoholConsumption;
-    if (stressLevel) updateData.stress_level = stressLevel;
+    if (firstName !== undefined) updateData.first_name = firstName;
+    if (lastName !== undefined) updateData.last_name = lastName;
+    if (dateOfBirth !== undefined) updateData.date_of_birth = dateOfBirth;
+    if (gender !== undefined) updateData.gender = gender;
+    if (address !== undefined) updateData.address = address;
+    if (emergencyContact !== undefined) updateData.emergency_contact = emergencyContact;
+    if (emergencyName !== undefined) updateData.emergency_name = emergencyName;
+    if (emergencyRelation !== undefined) updateData.emergency_relation = emergencyRelation;
+    if (occupation !== undefined) updateData.occupation = occupation;
+    if (exerciseFrequency !== undefined) updateData.exercise_frequency = exerciseFrequency;
+    if (sleepPattern !== undefined) updateData.sleep_pattern = sleepPattern;
+    if (smokingStatus !== undefined) updateData.smoking_status = smokingStatus;
+    if (alcoholConsumption !== undefined) updateData.alcohol_consumption = alcoholConsumption;
+    if (stressLevel !== undefined) updateData.stress_level = stressLevel;
     if (previousAyurvedicTreatment !== undefined) updateData.previous_ayurvedic_treatment = previousAyurvedicTreatment;
+    if (dietaryPreferences !== undefined) updateData.dietary_preferences = dietaryPreferences;
+    if (specificConcerns !== undefined) updateData.specific_concerns = specificConcerns;
+    if (treatmentGoals !== undefined) updateData.treatment_goals = treatmentGoals;
 
     // Handle JSON arrays
-    if (chronicConditions) updateData.chronic_conditions = chronicConditions;
-    if (currentMedications) updateData.current_medications = currentMedications;
-    if (allergies) updateData.allergies = allergies;
-    if (previousSurgeries) updateData.previous_surgeries = previousSurgeries;
-    if (familyHistory) updateData.family_history = familyHistory;
-    if (dietaryPreferences) updateData.dietary_preferences = dietaryPreferences;
-    if (specificConcerns) updateData.specific_concerns = specificConcerns;
-    if (treatmentGoals) updateData.treatment_goals = treatmentGoals;
+    if (chronicConditions !== undefined) updateData.chronic_conditions = chronicConditions;
+    if (currentMedications !== undefined) updateData.current_medications = currentMedications;
+    if (allergies !== undefined) updateData.allergies = allergies;
+    if (previousSurgeries !== undefined) updateData.previous_surgeries = previousSurgeries;
+    if (familyHistory !== undefined) updateData.family_history = familyHistory;
 
     const { data: updatedUser, error } = await supabase
       .from('users')

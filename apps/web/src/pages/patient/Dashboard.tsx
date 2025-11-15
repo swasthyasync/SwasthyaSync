@@ -1,6 +1,10 @@
 // apps/web/src/pages/patient/Dashboard.tsx - UPDATED to use backend API
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
+
+
+
+
 import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase, authService, User as SupabaseUser } from '../../utils/supabase';
 import { profileService } from '../../services/profileService';
@@ -10,6 +14,7 @@ import ChatWidget from '../../components/ChatWidget';
 import PrakritiSummaryCard from '../../components/PrakritiSummaryCard';
 import api from '../../utils/api';
 import PrakritiVisualizationEnhanced from '../../components/PrakritiVisualizationEnhanced';
+import NutritionDashboard from '../../components/NutritionDashboard';
 
 /* ---------- types ---------- */
 interface PrakritiScores {
@@ -162,6 +167,9 @@ const PatientDashboard: React.FC = () => {
 
   // Fetch prakriti scores and user data
   useEffect(() => {
+    let pollInterval: NodeJS.Timeout | null = null;
+    let subscription: any = null;
+    
     const fetchPrakritiData = async () => {
       try {
         setLoading(true);
@@ -196,6 +204,12 @@ const PatientDashboard: React.FC = () => {
               ml_prediction: parsedScores.ml_prediction
             };
             setPrakritiScores(normalizedScores);
+            
+            // Clear polling interval once we have valid data
+            if (pollInterval) {
+              clearInterval(pollInterval);
+              pollInterval = null;
+            }
           } else {
             console.warn('Invalid scores structure:', scores);
             setPrakritiScores(null);
@@ -229,8 +243,57 @@ const PatientDashboard: React.FC = () => {
       }
     };
 
+    // Set up real-time subscription to questionnaire changes
+    const setupRealTimeSubscription = () => {
+      if (user?.id) {
+        subscription = supabase
+          .channel('questionnaire-changes')
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'questionnaire_answers',
+              filter: `user_id=eq.${user.id}`
+            },
+            (payload) => {
+              console.log('Questionnaire data changed, fetching latest...', payload);
+              // Fetch updated data when changes occur
+              fetchPrakritiData();
+            }
+          )
+          .subscribe();
+      }
+    };
+
+    // Initial fetch
     fetchPrakritiData();
-  }, []);
+    
+    // Set up real-time subscription
+    setupRealTimeSubscription();
+    
+    // Set up polling as fallback (every 10 seconds for 1 minute max)
+    let pollCount = 0;
+    pollInterval = setInterval(() => {
+      pollCount++;
+      if (pollCount < 6) { // Stop polling after 1 minute
+        fetchPrakritiData();
+      } else if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    }, 10000);
+
+    // Clean up interval and subscription on component unmount
+    return () => {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+      if (subscription) {
+        subscription.unsubscribe();
+      }
+    };
+  }, [user?.id]);
 
   /* ---------- theme CSS injection ---------- */
   useEffect(() => {
@@ -1479,6 +1542,7 @@ const calculateDefaultPercents = (scoresData: any): { vata: number; pitta: numbe
               <button
                 className="bg-white rounded-xl p-6 hover:shadow-xl transition-all text-left group ayurveda-card"
                 disabled={!prakritiScores}
+                onClick={() => setActiveView('nutrition')}
               >
                 <div className="flex items-center mb-4">
                   <div className="p-3 bg-orange-100 rounded-lg group-hover:bg-orange-200 transition-colors">
@@ -1808,14 +1872,18 @@ const calculateDefaultPercents = (scoresData: any): { vata: number; pitta: numbe
               </div>
 
               <div className="ayurveda-card p-6">
-                <h3 className="text-lg font-semibold text-gray-800 mb-4">Past Appointments</h3>
+                <h3 className="text-lg font-semibold text-gray-800 mb-4">Appointment History</h3>
                 <div className="space-y-4">
-                  {appointments.filter(apt => apt.status === 'completed').length > 0 ? (
-                    appointments.filter(apt => apt.status === 'completed').map((appointment) => (
+                  {appointments.filter(apt => apt.status !== 'upcoming').length > 0 ? (
+                    appointments.filter(apt => apt.status !== 'upcoming').map((appointment) => (
                       <div key={appointment.id} className="p-4 border border-gray-200 bg-gray-50 rounded-lg">
                         <div className="flex justify-between items-start mb-2">
                           <h4 className="font-medium text-gray-800">{appointment.doctorName}</h4>
-                          <span className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded-full">
+                          <span className={`text-xs px-2 py-1 rounded-full ${
+                            appointment.status === 'completed' ? 'bg-green-200 text-green-800' :
+                            appointment.status === 'cancelled' ? 'bg-red-200 text-red-800' :
+                            'bg-gray-200 text-gray-800'
+                          }`}>
                             {appointment.status}
                           </span>
                         </div>
@@ -1827,12 +1895,66 @@ const calculateDefaultPercents = (scoresData: any): { vata: number; pitta: numbe
                     ))
                   ) : (
                     <div className="text-center py-8 text-gray-500">
-                      <p>No past appointments</p>
+                      <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />
+                      </svg>
+                      <p>No appointment history</p>
                     </div>
                   )}
                 </div>
               </div>
             </div>
+          </>
+        )}
+
+        {/* Nutrition View */}
+        {activeView === 'nutrition' && (
+          <>
+            <div className="mb-8">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-3xl font-bold mb-2" style={{ color: theme === 'dark' ? 'var(--accent-gold-3)' : 'var(--muted-brown)' }}>Personalized Nutrition Plan</h2>
+                  <p className={theme === 'dark' ? 'text-amber-200' : 'text-gray-700'}>Ayurvedic diet recommendations based on your {prakritiScores?.dominant || 'Prakriti'} constitution</p>
+                </div>
+                <button
+                  onClick={() => setActiveView('dashboard')}
+                  className="px-4 py-2 rounded-lg transition-colors flex items-center"
+                  style={{ background: 'rgba(255,248,220,0.85)', border: '1px solid var(--card-border)', color: '#6b4423' }}
+                >
+                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                  </svg>
+                  Back to Dashboard
+                </button>
+              </div>
+            </div>
+
+            {prakritiScores ? (
+              <div className="mb-8">
+                <NutritionDashboard />
+              </div>
+            ) : (
+              <div className="mb-8">
+                <div className="ayurveda-card p-8 text-center">
+                  <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg className="w-8 h-8 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />
+                    </svg>
+                  </div>
+                  <h3 className="text-xl font-semibold text-gray-800 mb-2">Complete Your Prakriti Assessment</h3>
+                  <p className="text-gray-600 mb-6">
+                    Get personalized Ayurvedic nutrition recommendations based on your unique constitution.
+                  </p>
+                  <button
+                    onClick={handleTakeQuestionnaire}
+                    className="px-6 py-3 rounded-lg transition-colors"
+                    style={{ background: 'linear-gradient(135deg, var(--accent-gold-1), var(--accent-gold-2))', color: '#2c1810' }}
+                  >
+                    Take Assessment Now
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
 

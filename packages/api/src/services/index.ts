@@ -3,3 +3,4 @@ export { otpService } from './otpService';
 export { smsService } from './smsService';
 export { prakritiService } from './prakritiService';
 export * from './emailService';
+export { nutritionService } from './nutritionService';

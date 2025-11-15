@@ -513,66 +513,6 @@ const ProfileManager: React.FC<ProfileManagerProps> = ({ isOpen, onClose }) => {
                           </div>
 
                           <div>
-                            <label className="block text-sm font-semibold text-amber-900 mb-2">City</label>
-                            <input
-                              type="text"
-                              name="city"
-                              value={formData?.city || ''}
-                              onChange={handleProfileChange}
-                              className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent text-amber-900 bg-amber-50 placeholder-amber-400"
-                              placeholder="Enter your city"
-                            />
-                          </div>
-                          
-                          <div>
-                            <label className="block text-sm font-semibold text-amber-900 mb-2">State</label>
-                            <input
-                              type="text"
-                              name="state"
-                              value={formData?.state || ''}
-                              onChange={handleProfileChange}
-                              className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent text-amber-900 bg-amber-50 placeholder-amber-400"
-                              placeholder="Enter your state"
-                            />
-                          </div>
-                          
-                          <div>
-                            <label className="block text-sm font-semibold text-amber-900 mb-2">Country</label>
-                            <input
-                              type="text"
-                              name="country"
-                              value={formData?.country || ''}
-                              onChange={handleProfileChange}
-                              className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent text-amber-900 bg-amber-50 placeholder-amber-400"
-                              placeholder="Enter your country"
-                            />
-                          </div>
-                          
-                          <div>
-                            <label className="block text-sm font-semibold text-amber-900 mb-2">Zip Code</label>
-                            <input
-                              type="text"
-                              name="zip_code"
-                              value={formData?.zip_code || ''}
-                              onChange={handleProfileChange}
-                              className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent text-amber-900 bg-amber-50 placeholder-amber-400"
-                              placeholder="Enter your zip code"
-                            />
-                          </div>
-                          
-                          <div>
-                            <label className="block text-sm font-semibold text-amber-900 mb-2">Phone Number</label>
-                            <input
-                              type="text"
-                              name="phone_number"
-                              value={formData?.phone_number || ''}
-                              onChange={handleProfileChange}
-                              className="w-full px-4 py-2 border-2 border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent text-amber-900 bg-amber-50 placeholder-amber-400"
-                              placeholder="Enter your phone number"
-                            />
-                          </div>
-
-                          <div>
                             <label className="block text-sm font-semibold text-amber-900 mb-2">Occupation</label>
                             <input
                               type="text"

@@ -51,14 +51,15 @@ async function initTransporter() {
     transporter = null;
   }
 
+  // Always verify transporter in development
   if (transporter && process.env.NODE_ENV !== 'production') {
-    transporter.verify((err, success) => {
-      if (err) {
-        console.error('Email transporter verify failed:', err);
-      } else {
-        console.log('✅ Email transporter verified');
-      }
-    });
+    try {
+      await transporter.verify();
+      console.log('✅ Email transporter verified');
+    } catch (err) {
+      console.error('Email transporter verify failed:', err);
+      transporter = null; // Set to null if verification fails
+    }
   }
 
   return transporter;
